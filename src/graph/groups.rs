@@ -18,6 +18,8 @@ use crate::state::AppState;
 use crate::store::Directory;
 use crate::store::model::Group;
 
+use super::object_id_from_odata_id;
+
 /// Which navigation property a request addresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Link {
@@ -588,21 +590,6 @@ fn expand(directory: &Directory, group: &Group, expand: &[String]) -> Result<Val
     Ok(object)
 }
 
-/// Pull the object ID out of an `@odata.id` reference.
-///
-/// Clients send an absolute URL naming the real Graph host, so only the last path segment can
-/// be trusted.
-fn object_id_from_odata_id(odata_id: &str) -> Result<String, GraphError> {
-    let trimmed = odata_id.trim().trim_end_matches('/');
-    let candidate = trimmed.rsplit('/').next().unwrap_or_default();
-    if candidate.is_empty() {
-        return Err(GraphError::invalid_request(format!(
-            "The @odata.id value {odata_id:?} does not name a directory object."
-        )));
-    }
-    Ok(candidate.to_string())
-}
-
 /// Resolve an `@odata.bind` array supplied on create or update.
 fn bound_references(
     fields: &Map<String, Value>,
@@ -633,24 +620,4 @@ fn bound_references(
 fn serialise(group: &Group) -> Result<Value, GraphError> {
     serde_json::to_value(group)
         .map_err(|error| GraphError::internal(format!("serialising a group: {error}")))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn an_odata_id_reference_yields_the_trailing_object_id() {
-        // Clients send an absolute URL naming the real Graph host.
-        assert_eq!(
-            object_id_from_odata_id("https://graph.microsoft.com/v1.0/directoryObjects/0a1b-2c3d")
-                .unwrap(),
-            "0a1b-2c3d"
-        );
-        assert_eq!(
-            object_id_from_odata_id("https://graph.microsoft.com/v1.0/users/0a1b/").unwrap(),
-            "0a1b"
-        );
-        assert!(object_id_from_odata_id("   ").is_err());
-    }
 }

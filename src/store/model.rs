@@ -88,12 +88,26 @@ pub struct Application {
     pub identifier_uris: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub app_roles: Vec<AppRole>,
+    /// Delegated permissions this application exposes, mirroring `api.oauth2PermissionScopes`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub oauth2_permission_scopes: Vec<PermissionScope>,
+    /// Permissions this application requests from other applications.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_resource_access: Vec<RequiredResourceAccess>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sign_in_audience: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub password_credentials: Vec<PasswordCredential>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub key_credentials: Vec<KeyCredential>,
     #[serde(with = "rfc3339")]
     pub created_date_time: OffsetDateTime,
+    /// Object IDs of the owners, a navigation property reached through `/owners`.
+    #[serde(skip)]
+    pub owners: Vec<String>,
+    /// Federated identity credentials, reached through their own navigation property.
+    #[serde(skip)]
+    pub federated_identity_credentials: Vec<FederatedIdentityCredential>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -107,6 +121,17 @@ pub struct ServicePrincipal {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub app_roles: Vec<AppRole>,
+    /// Delegated permissions, copied from the application when the principal is created.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub oauth2_permission_scopes: Vec<PermissionScope>,
+    /// The identifier URIs clients may use to address this principal, plus its appId.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub service_principal_names: Vec<String>,
+    /// Whether a principal must hold an app role assignment before it can obtain a token.
+    #[serde(default)]
+    pub app_role_assignment_required: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub password_credentials: Vec<PasswordCredential>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -122,6 +147,9 @@ pub struct ServicePrincipal {
     /// an API response.
     #[serde(skip)]
     pub granted_app_roles: Vec<String>,
+    /// Object IDs of the owners, a navigation property reached through `/owners`.
+    #[serde(skip)]
+    pub owners: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -137,6 +165,57 @@ pub struct AppRole {
     pub is_enabled: bool,
     /// `Application` for app-only roles, `User` for ones a user or group can hold.
     pub allowed_member_types: Vec<String>,
+}
+
+/// A delegated permission a resource application exposes, such as `User.Read`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionScope {
+    pub id: String,
+    pub value: Option<String>,
+    pub admin_consent_display_name: String,
+    pub admin_consent_description: String,
+    #[serde(default)]
+    pub user_consent_display_name: Option<String>,
+    #[serde(default)]
+    pub user_consent_description: Option<String>,
+    pub is_enabled: bool,
+    /// `Admin` when the permission needs admin consent, `User` otherwise.
+    #[serde(rename = "type")]
+    pub kind: String,
+}
+
+/// A block of permissions requested from one resource application.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequiredResourceAccess {
+    /// The `appId` of the resource, such as Microsoft Graph.
+    pub resource_app_id: String,
+    pub resource_access: Vec<ResourceAccess>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceAccess {
+    /// The ID of an app role or delegated scope on the resource.
+    pub id: String,
+    /// `Role` for an application permission, `Scope` for a delegated one.
+    #[serde(rename = "type")]
+    pub kind: String,
+}
+
+/// A trust relationship letting an external token stand in for a client secret.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FederatedIdentityCredential {
+    pub id: String,
+    pub name: String,
+    pub issuer: String,
+    pub subject: String,
+    #[serde(default)]
+    pub audiences: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// A client secret.
@@ -183,4 +262,55 @@ pub struct KeyCredential {
     pub start_date_time: OffsetDateTime,
     #[serde(with = "rfc3339")]
     pub end_date_time: OffsetDateTime,
+}
+
+impl Application {
+    /// A new registration with no credentials, permissions or owners.
+    pub fn new(id: String, app_id: String, display_name: String) -> Self {
+        Self {
+            id,
+            app_id,
+            display_name,
+            identifier_uris: Vec::new(),
+            app_roles: Vec::new(),
+            oauth2_permission_scopes: Vec::new(),
+            required_resource_access: Vec::new(),
+            // Entra's default for a new registration.
+            sign_in_audience: Some("AzureADMyOrg".to_string()),
+            password_credentials: Vec::new(),
+            key_credentials: Vec::new(),
+            created_date_time: OffsetDateTime::now_utc(),
+            owners: Vec::new(),
+            federated_identity_credentials: Vec::new(),
+            extra: Map::new(),
+        }
+    }
+}
+
+impl ServicePrincipal {
+    /// The principal Entra creates for an application registration.
+    ///
+    /// App roles and delegated permissions are copied from the application, because that is
+    /// where they are defined and the principal is what other objects are assigned against.
+    pub fn for_application(id: String, application: &Application) -> Self {
+        let mut names = vec![application.app_id.clone()];
+        names.extend(application.identifier_uris.iter().cloned());
+
+        Self {
+            id,
+            app_id: application.app_id.clone(),
+            display_name: application.display_name.clone(),
+            app_roles: application.app_roles.clone(),
+            oauth2_permission_scopes: application.oauth2_permission_scopes.clone(),
+            service_principal_names: names,
+            app_role_assignment_required: false,
+            tags: Vec::new(),
+            password_credentials: Vec::new(),
+            key_credentials: Vec::new(),
+            created_date_time: OffsetDateTime::now_utc(),
+            granted_app_roles: Vec::new(),
+            owners: Vec::new(),
+            extra: Map::new(),
+        }
+    }
 }

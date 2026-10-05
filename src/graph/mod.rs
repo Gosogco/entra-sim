@@ -9,8 +9,11 @@
 //! The simulator's objects are a superset of both versions, so one set of handlers answers for
 //! both; only the `@odata.context` differs, and it is built from the request's own prefix.
 
+pub mod applications;
 pub mod error;
 pub mod groups;
+pub mod permissions_catalogue;
+pub mod service_principals;
 pub mod users;
 
 use axum::Json;
@@ -32,7 +35,11 @@ pub fn router() -> Router<AppState> {
 }
 
 fn resources() -> Router<AppState> {
-    Router::new().merge(users::router()).merge(groups::router())
+    Router::new()
+        .merge(users::router())
+        .merge(groups::router())
+        .merge(applications::router())
+        .merge(service_principals::router())
 }
 
 /// Build a Graph collection response, applying ordering, paging and `$select`.
@@ -77,4 +84,39 @@ pub fn object_response(
         );
     }
     Json(object).into_response()
+}
+
+/// Pull the object ID out of an `@odata.id` reference.
+///
+/// Clients send an absolute URL naming the real Graph host, so only the last path segment can
+/// be trusted.
+pub fn object_id_from_odata_id(odata_id: &str) -> Result<String, error::GraphError> {
+    let trimmed = odata_id.trim().trim_end_matches('/');
+    let candidate = trimmed.rsplit('/').next().unwrap_or_default();
+    if candidate.is_empty() {
+        return Err(error::GraphError::invalid_request(format!(
+            "The @odata.id value {odata_id:?} does not name a directory object."
+        )));
+    }
+    Ok(candidate.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_odata_id_reference_yields_the_trailing_object_id() {
+        // Clients send an absolute URL naming the real Graph host.
+        assert_eq!(
+            object_id_from_odata_id("https://graph.microsoft.com/v1.0/directoryObjects/0a1b-2c3d")
+                .unwrap(),
+            "0a1b-2c3d"
+        );
+        assert_eq!(
+            object_id_from_odata_id("https://graph.microsoft.com/v1.0/users/0a1b/").unwrap(),
+            "0a1b"
+        );
+        assert!(object_id_from_odata_id("   ").is_err());
+    }
 }
