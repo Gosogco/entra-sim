@@ -18,7 +18,11 @@ use tokio::sync::RwLock;
 
 use serde_json::Value;
 
-use crate::store::model::{Application, Group, PasswordCredential, ServicePrincipal, User};
+use crate::store::model::MICROSOFT_GRAPH_APP_ID;
+use crate::store::model::{
+    AppRoleAssignment, Application, DirectoryRole, Group, OAuth2PermissionGrant,
+    PasswordCredential, ServicePrincipal, User,
+};
 
 /// Everything the simulated tenant contains.
 #[derive(Debug, Default)]
@@ -27,6 +31,10 @@ pub struct Directory {
     pub groups: BTreeMap<String, Group>,
     pub applications: BTreeMap<String, Application>,
     pub service_principals: BTreeMap<String, ServicePrincipal>,
+    pub app_role_assignments: BTreeMap<String, AppRoleAssignment>,
+    pub oauth2_permission_grants: BTreeMap<String, OAuth2PermissionGrant>,
+    /// Directory roles that have been activated in this tenant.
+    pub directory_roles: BTreeMap<String, DirectoryRole>,
 }
 
 impl Directory {
@@ -61,6 +69,46 @@ impl Directory {
             .password_credentials
             .iter()
             .find(|credential| credential.accepts(secret, now))
+    }
+}
+
+impl Directory {
+    /// The Microsoft Graph service principal, which is the resource every Graph permission is
+    /// defined on and assigned against.
+    pub fn graph_service_principal(&self) -> Option<&ServicePrincipal> {
+        self.service_principal_by_app_id(MICROSOFT_GRAPH_APP_ID)
+    }
+
+    /// The app role values granted to a principal on the Graph resource.
+    ///
+    /// This is what fills an app-only token's `roles` claim. Entra derives it by resolving the
+    /// principal's app role assignments against the resource's defined roles, and so does this:
+    /// an assignment naming a role the resource does not define grants nothing.
+    pub fn granted_graph_role_values(&self, principal_id: &str) -> Vec<String> {
+        let Some(resource) = self.graph_service_principal() else {
+            return Vec::new();
+        };
+
+        let mut values: Vec<String> = self
+            .app_role_assignments
+            .values()
+            .filter(|assignment| {
+                assignment.principal_id == principal_id && assignment.resource_id == resource.id
+            })
+            .filter_map(|assignment| {
+                resource
+                    .app_roles
+                    .iter()
+                    .find(|role| role.id == assignment.app_role_id)
+                    .and_then(|role| role.value.clone())
+            })
+            .collect();
+
+        // A principal can hold the same role through more than one assignment; the claim lists
+        // each value once.
+        values.sort();
+        values.dedup();
+        values
     }
 }
 

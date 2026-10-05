@@ -138,15 +138,6 @@ pub struct ServicePrincipal {
     pub key_credentials: Vec<KeyCredential>,
     #[serde(with = "rfc3339")]
     pub created_date_time: OffsetDateTime,
-    /// App role values granted to this principal on the Graph resource, which become the
-    /// `roles` claim of its app-only tokens.
-    ///
-    /// Not part of Graph and never serialised: in Entra this is derived by resolving the
-    /// principal's `appRoleAssignments` against the resource application's `appRoles`. It is
-    /// stored pre-resolved until that machinery exists, so no invented property can leak into
-    /// an API response.
-    #[serde(skip)]
-    pub granted_app_roles: Vec<String>,
     /// Object IDs of the owners, a navigation property reached through `/owners`.
     #[serde(skip)]
     pub owners: Vec<String>,
@@ -308,9 +299,71 @@ impl ServicePrincipal {
             password_credentials: Vec::new(),
             key_credentials: Vec::new(),
             created_date_time: OffsetDateTime::now_utc(),
-            granted_app_roles: Vec::new(),
             owners: Vec::new(),
             extra: Map::new(),
         }
     }
+}
+
+/// A grant of one app role on a resource to one principal.
+///
+/// This is what puts a value in an app-only token's `roles` claim.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppRoleAssignment {
+    pub id: String,
+    /// The `id` of an app role defined by the resource. The all-zero GUID means "no role",
+    /// which Entra uses to grant access without granting a permission.
+    pub app_role_id: String,
+    /// Object ID of the user, group or service principal receiving the role.
+    pub principal_id: String,
+    pub principal_display_name: Option<String>,
+    /// `User`, `Group` or `ServicePrincipal`.
+    pub principal_type: String,
+    /// Object ID of the service principal that defines the role.
+    pub resource_id: String,
+    pub resource_display_name: Option<String>,
+    #[serde(with = "rfc3339")]
+    pub created_date_time: OffsetDateTime,
+}
+
+/// Delegated permissions consented for a client against a resource.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuth2PermissionGrant {
+    pub id: String,
+    /// Object ID of the client service principal.
+    pub client_id: String,
+    /// `AllPrincipals` for admin consent, `Principal` for one user.
+    pub consent_type: String,
+    /// Set only when `consentType` is `Principal`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub principal_id: Option<String>,
+    /// Object ID of the resource service principal.
+    pub resource_id: String,
+    /// Space-separated permission values, as Graph stores them.
+    pub scope: String,
+}
+
+/// A directory role that has been activated in the tenant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryRole {
+    pub id: String,
+    /// The built-in template this role was activated from.
+    pub role_template_id: String,
+    pub display_name: String,
+    pub description: String,
+    /// Object IDs of the members, a navigation property reached through `/members`.
+    #[serde(skip)]
+    pub members: Vec<String>,
+}
+
+/// A built-in role that can be activated.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryRoleTemplate {
+    pub id: String,
+    pub display_name: String,
+    pub description: String,
 }

@@ -60,6 +60,15 @@ pub struct Config {
     )]
     pub tenant_id: String,
 
+    /// The tenant's initial domain, reported by /domains and /organization. Clients build user
+    /// principal names from it.
+    #[arg(
+        long,
+        env = "ENTRA_SIM_TENANT_DOMAIN",
+        default_value = "entra-sim.test"
+    )]
+    pub tenant_domain: String,
+
     /// Sign tokens with this PKCS#8 PEM key instead of generating one, so that the published
     /// key identifier survives a restart.
     #[arg(long, env = "ENTRA_SIM_SIGNING_KEY")]

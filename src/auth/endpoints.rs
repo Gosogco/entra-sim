@@ -111,7 +111,7 @@ async fn client_credentials(
             client_id: &client_id,
             principal_id: &principal.id,
             display_name: Some(&application.display_name),
-            roles: principal.granted_app_roles.clone(),
+            roles: directory.granted_graph_role_values(&principal.id),
             ttl_seconds: state.config.token_ttl_seconds,
         },
         now,

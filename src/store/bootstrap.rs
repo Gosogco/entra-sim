@@ -15,8 +15,9 @@ use crate::config::Config;
 use crate::graph::permissions_catalogue;
 use crate::store::Directory;
 use crate::store::model::{
-    Application, MICROSOFT_GRAPH_APP_ID, PasswordCredential, ServicePrincipal,
+    AppRoleAssignment, Application, MICROSOFT_GRAPH_APP_ID, PasswordCredential, ServicePrincipal,
 };
+use tracing::warn;
 
 /// How long the bootstrap secret is valid. Long enough that a test suite never trips over it.
 const SECRET_LIFETIME_YEARS: i64 = 10;
@@ -78,11 +79,12 @@ fn install_bootstrap_client(directory: &mut Directory, config: &Config) {
         secret_text: config.bootstrap_client_secret.clone(),
     }];
 
-    let mut principal = ServicePrincipal::for_application(
+    let principal = ServicePrincipal::for_application(
         deterministic_id(&app_id, "servicePrincipal"),
         &application,
     );
-    principal.granted_app_roles = config.bootstrap_app_roles.clone();
+    let principal_id = principal.id.clone();
+    let principal_name = principal.display_name.clone();
 
     directory
         .applications
@@ -90,6 +92,65 @@ fn install_bootstrap_client(directory: &mut Directory, config: &Config) {
     directory
         .service_principals
         .insert(principal.id.clone(), principal);
+
+    grant_graph_roles(
+        directory,
+        &principal_id,
+        &principal_name,
+        &config.bootstrap_app_roles,
+    );
+}
+
+/// Grant the named Graph app roles to a principal as real assignment objects.
+///
+/// Assignments rather than a stored list of names, so that the roles the simulator puts in a
+/// token come from the same place a client would read them from, and so revoking an assignment
+/// through the API actually changes what the next token carries.
+fn grant_graph_roles(
+    directory: &mut Directory,
+    principal_id: &str,
+    principal_name: &str,
+    role_values: &[String],
+) {
+    let Some(resource) = directory.graph_service_principal() else {
+        return;
+    };
+    let resource_id = resource.id.clone();
+    let resource_name = resource.display_name.clone();
+
+    let mut assignments = Vec::new();
+    for value in role_values {
+        let Some(role) = resource
+            .app_roles
+            .iter()
+            .find(|role| role.value.as_deref() == Some(value.as_str()))
+        else {
+            // Naming a role Graph does not define is a configuration mistake worth reporting,
+            // rather than silently producing a client with fewer permissions than asked for.
+            warn!(
+                role = %value,
+                "ignoring an unknown Microsoft Graph app role in the bootstrap configuration"
+            );
+            continue;
+        };
+
+        assignments.push(AppRoleAssignment {
+            id: deterministic_id(&format!("{principal_id}:{}", role.id), "appRoleAssignment"),
+            app_role_id: role.id.clone(),
+            principal_id: principal_id.to_string(),
+            principal_display_name: Some(principal_name.to_string()),
+            principal_type: "ServicePrincipal".to_string(),
+            resource_id: resource_id.clone(),
+            resource_display_name: Some(resource_name.clone()),
+            created_date_time: OffsetDateTime::now_utc(),
+        });
+    }
+
+    for assignment in assignments {
+        directory
+            .app_role_assignments
+            .insert(assignment.id.clone(), assignment);
+    }
 }
 
 /// Derive a stable object ID from the client ID, so restarting with the same configuration

@@ -9,11 +9,14 @@
 //! The simulator's objects are a superset of both versions, so one set of handlers answers for
 //! both; only the `@odata.context` differs, and it is built from the request's own prefix.
 
+pub mod app_role_assignments;
 pub mod applications;
+pub mod directory_roles;
 pub mod error;
 pub mod groups;
 pub mod permissions_catalogue;
 pub mod service_principals;
+pub mod tenant;
 pub mod users;
 
 use axum::Json;
@@ -40,6 +43,9 @@ fn resources() -> Router<AppState> {
         .merge(groups::router())
         .merge(applications::router())
         .merge(service_principals::router())
+        .merge(app_role_assignments::router())
+        .merge(directory_roles::router())
+        .merge(tenant::router())
 }
 
 /// Build a Graph collection response, applying ordering, paging and `$select`.

@@ -211,3 +211,19 @@ impl Graph {
             .expect("sending request")
     }
 }
+
+/// Decode a JWT's claims without verifying it.
+///
+/// Verification is covered by the token tests; here the claims are the subject of the
+/// assertion, so decoding is enough.
+pub fn decode_claims(token: &str) -> serde_json::Value {
+    use base64::Engine;
+    let payload = token
+        .split('.')
+        .nth(1)
+        .expect("a JWT should have three parts");
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .expect("the claims should be base64url");
+    serde_json::from_slice(&bytes).expect("the claims should be JSON")
+}
