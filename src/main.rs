@@ -1,8 +1,10 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
+use entra_sim::auth::keys::SigningKey;
 use entra_sim::config::Config;
 use entra_sim::state::AppState;
 use entra_sim::{router, tls};
@@ -34,7 +36,10 @@ async fn run(config: Config) -> Result<()> {
         Some(build_tls(&config).await?)
     };
 
-    let app = router(AppState::new(config));
+    let signing_key = Arc::new(load_signing_key(&config).await?);
+    info!(kid = %signing_key.kid, "token signing key ready");
+
+    let app = router(AppState::new(config, signing_key));
 
     let http = {
         let app = app.clone();
@@ -62,6 +67,23 @@ async fn run(config: Config) -> Result<()> {
     // Either listener failing takes the process down, so a misconfiguration is loud.
     tokio::try_join!(flatten(http), flatten(https))?;
     Ok(())
+}
+
+async fn load_signing_key(config: &Config) -> Result<SigningKey> {
+    match &config.signing_key {
+        Some(path) => {
+            let pem = tokio::fs::read_to_string(path)
+                .await
+                .with_context(|| format!("reading signing key {}", path.display()))?;
+            SigningKey::from_pkcs8_pem(&pem)
+        }
+        None => {
+            // Generating an RSA 2048 key can take a noticeable moment, and this is the first
+            // thing that happens at startup, so say so rather than appear hung.
+            info!("generating a token signing key");
+            SigningKey::generate()
+        }
+    }
 }
 
 async fn build_tls(config: &Config) -> Result<RustlsConfig> {

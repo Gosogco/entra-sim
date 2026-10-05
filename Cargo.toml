@@ -16,6 +16,12 @@ tokio = { version = "1.53.2", features = ["full"] }
 tower-http = { version = "0.7.1", features = ["trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+jsonwebtoken = "11.1.0"
+rsa = { version = "0.9.10", features = ["getrandom"] }
+base64 = "0.23.1"
+sha2 = "0.11.0"
+uuid = { version = "1.27.0", features = ["v4"] }
+rand = "0.8"
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

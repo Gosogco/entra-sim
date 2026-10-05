@@ -6,10 +6,16 @@
 #![allow(dead_code)]
 
 use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::{Arc, LazyLock};
 
 use clap::Parser;
+use entra_sim::auth::keys::SigningKey;
 use entra_sim::config::Config;
 use entra_sim::state::AppState;
+
+/// Generating an RSA 2048 key costs real time, so every simulator in a test binary shares one.
+static SIGNING_KEY: LazyLock<Arc<SigningKey>> =
+    LazyLock::new(|| Arc::new(SigningKey::generate().expect("generating a signing key")));
 
 pub struct Sim {
     pub base_url: String,
@@ -39,7 +45,7 @@ impl Sim {
 
         let tenant_id = config.tenant_id.clone();
         let public_base_url = config.public_base_url();
-        let app = entra_sim::router(AppState::new(config));
+        let app = entra_sim::router(AppState::new(config, SIGNING_KEY.clone()));
 
         tokio::spawn(async move {
             axum::serve(listener, app).await.expect("serving");

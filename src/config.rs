@@ -59,6 +59,11 @@ pub struct Config {
         default_value = "00000000-0000-0000-0000-000000000001"
     )]
     pub tenant_id: String,
+
+    /// Sign tokens with this PKCS#8 PEM key instead of generating one, so that the published
+    /// key identifier survives a restart.
+    #[arg(long, env = "ENTRA_SIM_SIGNING_KEY")]
+    pub signing_key: Option<PathBuf>,
 }
 
 impl Config {
@@ -69,5 +74,18 @@ impl Config {
     /// here would put a double slash in every token request the provider makes.
     pub fn public_base_url(&self) -> String {
         format!("https://{}", self.public_host)
+    }
+
+    /// Map a tenant segment from a request path onto the single tenant this simulator serves.
+    ///
+    /// Entra accepts `common`, `organizations` and `consumers` as aliases that resolve to a
+    /// concrete tenant at sign-in time, and the issuer it then stamps into tokens always names
+    /// the concrete tenant. Anything else is passed through, so that a request for the wrong
+    /// tenant is still visible as such to the handler.
+    pub fn resolve_tenant(&self, tenant: &str) -> String {
+        match tenant {
+            "common" | "organizations" | "consumers" => self.tenant_id.clone(),
+            other => other.to_string(),
+        }
     }
 }
