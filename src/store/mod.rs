@@ -9,6 +9,7 @@
 
 pub mod bootstrap;
 pub mod model;
+pub mod snapshot;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

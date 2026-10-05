@@ -34,6 +34,13 @@ impl Sim {
 
     /// Start a simulator, letting the caller adjust the configuration first.
     pub async fn start_with(adjust: impl FnOnce(&mut Config)) -> Self {
+        Self::try_start_with(adjust)
+            .await
+            .expect("the simulator should start")
+    }
+
+    /// Start a simulator, returning the error instead of panicking.
+    pub async fn try_start_with(adjust: impl FnOnce(&mut Config)) -> anyhow::Result<Self> {
         let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
             .await
             .expect("binding an ephemeral port");
@@ -49,20 +56,21 @@ impl Sim {
         let public_base_url = config.public_base_url();
         let bootstrap_client_id = config.bootstrap_client_id.clone();
         let bootstrap_client_secret = config.bootstrap_client_secret.clone();
-        let app = entra_sim::router(AppState::new(config, SIGNING_KEY.clone()));
+        let state = AppState::with_seed(config, SIGNING_KEY.clone()).await?;
+        let app = entra_sim::router(state);
 
         tokio::spawn(async move {
             axum::serve(listener, app).await.expect("serving");
         });
 
-        Self {
+        Ok(Self {
             base_url: format!("http://{addr}"),
             public_base_url,
             tenant_id,
             bootstrap_client_id,
             bootstrap_client_secret,
             client: reqwest::Client::new(),
-        }
+        })
     }
 
     /// A Graph client whose token carries exactly `roles`, for testing enforcement.
@@ -204,6 +212,24 @@ impl Sim {
             .send()
             .await
             .expect("sending the token request")
+    }
+
+    /// POST a body to a control endpoint, asserting success.
+    pub async fn post_json(&self, path: &str, body: &serde_json::Value) -> serde_json::Value {
+        let response = self
+            .client
+            .post(self.url(path))
+            .json(body)
+            .send()
+            .await
+            .expect("sending request");
+        let status = response.status();
+        let decoded: serde_json::Value = response.json().await.expect("decoding JSON");
+        assert!(
+            status.is_success(),
+            "POST {path} returned {status}: {decoded}"
+        );
+        decoded
     }
 
     pub async fn get_json(&self, path: &str) -> serde_json::Value {

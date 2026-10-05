@@ -60,6 +60,11 @@ pub struct Config {
     )]
     pub tenant_id: String,
 
+    /// Load this directory snapshot at startup and on every reset. Use the same shape as
+    /// `GET /__sim__/snapshot`.
+    #[arg(long, env = "ENTRA_SIM_SEED")]
+    pub seed: Option<PathBuf>,
+
     /// Sign this user in automatically instead of showing the picker, for tests that cannot
     /// drive a browser. A client may still force the picker with `prompt=login`.
     #[arg(long, env = "ENTRA_SIM_AUTO_SIGN_IN_USER")]

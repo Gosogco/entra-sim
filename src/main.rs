@@ -39,7 +39,8 @@ async fn run(config: Config) -> Result<()> {
     let signing_key = Arc::new(load_signing_key(&config).await?);
     info!(kid = %signing_key.kid, "token signing key ready");
 
-    let app = router(AppState::new(config, signing_key));
+    let state = AppState::with_seed(config, signing_key).await?;
+    let app = router(state);
 
     let http = {
         let app = app.clone();
