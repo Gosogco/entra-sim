@@ -8,6 +8,7 @@ pub mod config;
 pub mod control;
 pub mod metadata;
 pub mod state;
+pub mod store;
 pub mod tls;
 
 use axum::Router;

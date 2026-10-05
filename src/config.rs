@@ -64,6 +64,44 @@ pub struct Config {
     /// key identifier survives a restart.
     #[arg(long, env = "ENTRA_SIM_SIGNING_KEY")]
     pub signing_key: Option<PathBuf>,
+
+    /// Client ID of the application the simulator registers at startup. Without a client that
+    /// already exists, nothing could authenticate in order to create one.
+    #[arg(
+        long,
+        env = "ENTRA_SIM_BOOTSTRAP_CLIENT_ID",
+        default_value = "11111111-1111-1111-1111-111111111111"
+    )]
+    pub bootstrap_client_id: String,
+
+    /// Client secret for the bootstrap application.
+    #[arg(
+        long,
+        env = "ENTRA_SIM_BOOTSTRAP_CLIENT_SECRET",
+        default_value = "entra-sim-bootstrap-secret"
+    )]
+    pub bootstrap_client_secret: String,
+
+    /// App roles granted to the bootstrap client, which become the `roles` claim in its tokens.
+    /// Defaults to the set the Terraform azuread provider needs to manage a directory.
+    #[arg(
+        long = "bootstrap-app-role",
+        env = "ENTRA_SIM_BOOTSTRAP_APP_ROLES",
+        value_delimiter = ',',
+        default_values_t = [
+            String::from("Application.ReadWrite.All"),
+            String::from("AppRoleAssignment.ReadWrite.All"),
+            String::from("Directory.ReadWrite.All"),
+            String::from("Group.ReadWrite.All"),
+            String::from("RoleManagement.ReadWrite.Directory"),
+            String::from("User.ReadWrite.All"),
+        ],
+    )]
+    pub bootstrap_app_roles: Vec<String>,
+
+    /// Lifetime of issued access tokens, in seconds.
+    #[arg(long, env = "ENTRA_SIM_TOKEN_TTL", default_value_t = 3600)]
+    pub token_ttl_seconds: u64,
 }
 
 impl Config {
