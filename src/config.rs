@@ -60,3 +60,14 @@ pub struct Config {
     )]
     pub tenant_id: String,
 }
+
+impl Config {
+    /// Base URL the simulator advertises, with no trailing slash.
+    ///
+    /// The absence of a trailing slash matters. `go-azure-sdk` builds the token URL as
+    /// `{loginEndpoint}/{tenant}/oauth2/v2.0/token` without normalising it, so a trailing slash
+    /// here would put a double slash in every token request the provider makes.
+    pub fn public_base_url(&self) -> String {
+        format!("https://{}", self.public_host)
+    }
+}

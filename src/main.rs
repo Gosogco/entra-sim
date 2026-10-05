@@ -1,22 +1,13 @@
-//! A simulator of the Microsoft Entra ID identity endpoints and the Microsoft Graph API.
-
-mod config;
-mod control;
-mod state;
-mod tls;
-
 use std::net::SocketAddr;
 
 use anyhow::{Context, Result};
-use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
-use tower_http::trace::TraceLayer;
+use entra_sim::config::Config;
+use entra_sim::state::AppState;
+use entra_sim::{router, tls};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-
-use crate::config::Config;
-use crate::state::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -26,8 +17,7 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let config = Config::parse();
-    run(config).await
+    run(Config::parse()).await
 }
 
 async fn run(config: Config) -> Result<()> {
@@ -37,38 +27,11 @@ async fn run(config: Config) -> Result<()> {
 
     let http_addr = SocketAddr::new(config.bind, config.http_port);
     let https_addr = SocketAddr::new(config.bind, config.https_port);
-    let serve_tls = !config.no_tls;
 
-    let tls = if serve_tls {
-        let material = tls::load_or_generate(
-            config.tls_cert.as_deref(),
-            config.tls_key.as_deref(),
-            &config.tls_sans,
-        )
-        .await?;
-
-        if let (Some(ca_pem), Some(path)) = (&material.ca_pem, &config.ca_out) {
-            if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-                tokio::fs::create_dir_all(parent)
-                    .await
-                    .with_context(|| format!("creating {}", parent.display()))?;
-            }
-            tokio::fs::write(path, ca_pem)
-                .await
-                .with_context(|| format!("writing CA certificate to {}", path.display()))?;
-            info!(path = %path.display(), "wrote CA certificate");
-        }
-
-        Some(
-            RustlsConfig::from_pem(
-                material.chain_pem.into_bytes(),
-                material.key_pem.into_bytes(),
-            )
-            .await
-            .context("building the TLS server configuration")?,
-        )
-    } else {
+    let tls = if config.no_tls {
         None
+    } else {
+        Some(build_tls(&config).await?)
     };
 
     let app = router(AppState::new(config));
@@ -101,13 +64,34 @@ async fn run(config: Config) -> Result<()> {
     Ok(())
 }
 
-async fn flatten(handle: tokio::task::JoinHandle<Result<()>>) -> Result<()> {
-    handle.await.context("server task panicked")?
+async fn build_tls(config: &Config) -> Result<RustlsConfig> {
+    let material = tls::load_or_generate(
+        config.tls_cert.as_deref(),
+        config.tls_key.as_deref(),
+        &config.tls_sans,
+    )
+    .await?;
+
+    if let (Some(ca_pem), Some(path)) = (&material.ca_pem, &config.ca_out) {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        tokio::fs::write(path, ca_pem)
+            .await
+            .with_context(|| format!("writing CA certificate to {}", path.display()))?;
+        info!(path = %path.display(), "wrote CA certificate");
+    }
+
+    RustlsConfig::from_pem(
+        material.chain_pem.into_bytes(),
+        material.key_pem.into_bytes(),
+    )
+    .await
+    .context("building the TLS server configuration")
 }
 
-fn router(state: AppState) -> Router {
-    Router::new()
-        .merge(control::router())
-        .layer(TraceLayer::new_for_http())
-        .with_state(state)
+async fn flatten(handle: tokio::task::JoinHandle<Result<()>>) -> Result<()> {
+    handle.await.context("server task panicked")?
 }
