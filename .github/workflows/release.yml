@@ -90,10 +90,35 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The release notes name an image reference, and nothing else checks that the reference
+      # resolves. Pull it from the registry and run it, so a wrong name or tag fails the
+      # release instead of shipping a broken instruction to users.
+      - name: Check the published image
+        env:
+          IMAGE_REF: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+        run: |
+          # Remove any local copy first, so this is a test of the registry.
+          docker image rm "$IMAGE_REF" 2>/dev/null || true
+          docker pull "$IMAGE_REF"
+
+          docker run --detach --name published --publish 8080:8080 "$IMAGE_REF"
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --output /dev/null http://127.0.0.1:8080/__sim__/health; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8080/__sim__/health
+          docker rm --force published
+
       - name: Create the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.ref_name }}
+          # Taken from docker/metadata-action rather than built from the tag name. The action
+          # lowercases the repository and strips the leading `v`, so `v0.1.0` publishes as
+          # `0.1.0`. Building the reference by hand produced a name that does not exist.
+          IMAGE_REF: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+          ALL_TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           # Written to a file rather than passed inline: the notes contain backticks and blank
           # lines, and an indented heredoc would carry its indentation into the markdown.
@@ -102,11 +127,18 @@ jobs:
             printf 'docker pull %s\n' "$IMAGE_REF"
             printf '```\n\n'
             printf 'Published for `linux/amd64` and `linux/arm64`.\n\n'
-            printf '## Pointing a client at it\n\n'
+            printf 'Tags for this release:\n\n'
+            printf '```\n%s\n```\n\n' "$ALL_TAGS"
+            printf '## Running it\n\n'
             printf '```sh\n'
-            printf 'docker run --rm -p 8080:8080 -p 8443:8443 \\\n'
-            printf '  -v "$PWD/certs:/certs" %s\n' "$IMAGE_REF"
+            printf 'mkdir -p certs\n'
+            printf 'docker run --rm --user "$(id -u):$(id -g)" \\\n'
+            printf '  -p 8080:8080 -p 8443:8443 \\\n'
+            printf '  -v "$PWD/certs:/certs" \\\n'
+            printf '  %s\n' "$IMAGE_REF"
             printf '```\n\n'
+            printf 'Create `certs` first and pass `--user`, or the container cannot write its\n'
+            printf 'CA certificate there. The CA is new on every restart.\n\n'
             printf 'For Terraform, set `metadata_host` (or `ARM_METADATA_HOSTNAME`) to the\n'
             printf "simulator's host and port, and \`SSL_CERT_FILE\` to the CA it writes to\n"
             printf '`/certs/ca.pem`.\n'
