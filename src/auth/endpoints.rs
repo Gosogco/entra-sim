@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use tracing::warn;
 
 use crate::auth::oauth_error::{self, OAuthFailure};
-use crate::auth::token::{AppTokenRequest, issue_app_token};
+use crate::auth::token::{AppTokenRequest, issue_app_token, issue_user_token};
 use crate::state::AppState;
 
 /// A token request. Fields are shared across grant types, so all are optional here and the
@@ -22,6 +22,10 @@ pub struct TokenRequest {
     pub client_id: Option<String>,
     pub client_secret: Option<String>,
     pub scope: Option<String>,
+    pub code: Option<String>,
+    pub redirect_uri: Option<String>,
+    pub code_verifier: Option<String>,
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -33,6 +37,12 @@ pub struct TokenResponse {
     pub access_token: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
+    /// Issued when the client asked for `openid`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id_token: Option<String>,
+    /// Issued when the client asked for `offline_access`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
 }
 
 pub fn router() -> Router<AppState> {
@@ -52,6 +62,8 @@ async fn token(
 
     match request.grant_type.as_deref() {
         Some("client_credentials") => client_credentials(&state, &tenant, &headers, &request).await,
+        Some("authorization_code") => authorization_code(&state, &tenant, &headers, &request).await,
+        Some("refresh_token") => refresh_token(&state, &tenant, &headers, &request).await,
         Some(other) => Err(oauth_error::unsupported_grant_type(other)),
         None => Err(oauth_error::invalid_request(
             "AADSTS900144: The request body must contain the following parameter: 'grant_type'.",
@@ -124,7 +136,256 @@ async fn client_credentials(
         ext_expires_in: expires_in,
         access_token,
         scope: request.scope.clone(),
+        // An app-only token represents no user, so there is nothing for an ID token to
+        // describe, and there is no sign-in to refresh.
+        id_token: None,
+        refresh_token: None,
     }))
+}
+
+/// Exchange an authorization code for tokens.
+async fn authorization_code(
+    state: &AppState,
+    tenant: &str,
+    headers: &HeaderMap,
+    request: &TokenRequest,
+) -> Result<Json<TokenResponse>, OAuthFailure> {
+    let code = request.code.as_deref().ok_or_else(|| {
+        oauth_error::invalid_request(
+            "AADSTS900144: The request body must contain the following parameter: 'code'.",
+        )
+    })?;
+
+    let now = OffsetDateTime::now_utc();
+    let issued = {
+        let mut sessions = state.sessions.lock().await;
+        sessions.take_code(code, now)
+    };
+    // A code that was already redeemed, never issued, or has expired is indistinguishable here,
+    // and Entra does not distinguish them either.
+    let issued = issued.ok_or_else(|| {
+        oauth_error::invalid_grant(
+            "AADSTS54005: OAuth2 Authorization code was already redeemed, please retry with a              new valid code or use an existing refresh token.",
+        )
+    })?;
+
+    // The client presenting the code must be the one it was issued to.
+    let presented_client = request
+        .client_id
+        .clone()
+        .or_else(|| basic_auth(headers).map(|(id, _)| id));
+    if presented_client.as_deref() != Some(issued.client_id.as_str()) {
+        return Err(oauth_error::invalid_grant(
+            "AADSTS70000: The provided authorization code was issued to a different client.",
+        ));
+    }
+
+    // And must present the same redirect URI, so a stolen code cannot be redeemed towards
+    // another destination.
+    if request.redirect_uri.as_deref() != Some(issued.redirect_uri.as_str()) {
+        return Err(oauth_error::invalid_grant(
+            "AADSTS50011: The redirect URI in the token request does not match the one the              authorization code was issued for.",
+        ));
+    }
+
+    crate::auth::pkce::verify(
+        issued.code_challenge.as_deref(),
+        issued.code_challenge_method.as_deref(),
+        request.code_verifier.as_deref(),
+    )
+    .map_err(|reason| oauth_error::invalid_grant(format!("AADSTS501481: {reason}.")))?;
+
+    // A confidential client must still authenticate; a public one has no secret to present and
+    // relies on PKCE instead.
+    authenticate_client_if_secret_presented(state, &issued.client_id, headers, request, now)
+        .await?;
+
+    issue_user_tokens(
+        state,
+        tenant,
+        &issued.client_id,
+        &issued.user_id,
+        &issued.scope,
+        issued.nonce.as_deref(),
+        now,
+    )
+    .await
+}
+
+/// Exchange a refresh token for a fresh set of tokens.
+async fn refresh_token(
+    state: &AppState,
+    tenant: &str,
+    headers: &HeaderMap,
+    request: &TokenRequest,
+) -> Result<Json<TokenResponse>, OAuthFailure> {
+    let presented = request.refresh_token.as_deref().ok_or_else(|| {
+        oauth_error::invalid_request(
+            "AADSTS900144: The request body must contain the following parameter: \
+             'refresh_token'.",
+        )
+    })?;
+
+    let now = OffsetDateTime::now_utc();
+    let issued = {
+        let mut sessions = state.sessions.lock().await;
+        sessions.take_refresh_token(presented, now)
+    };
+    let issued = issued.ok_or_else(|| {
+        oauth_error::invalid_grant(
+            "AADSTS700082: The refresh token has expired or is no longer valid.",
+        )
+    })?;
+
+    let presented_client = request
+        .client_id
+        .clone()
+        .or_else(|| basic_auth(headers).map(|(id, _)| id));
+    if presented_client.as_deref() != Some(issued.client_id.as_str()) {
+        return Err(oauth_error::invalid_grant(
+            "AADSTS70000: The provided refresh token was issued to a different client.",
+        ));
+    }
+
+    authenticate_client_if_secret_presented(state, &issued.client_id, headers, request, now)
+        .await?;
+
+    // A refresh cannot widen the grant: the scope comes from what was originally consented.
+    issue_user_tokens(
+        state,
+        tenant,
+        &issued.client_id,
+        &issued.user_id,
+        &issued.scope,
+        // A refreshed ID token carries no nonce; there was no fresh authorization request to
+        // bind it to.
+        None,
+        now,
+    )
+    .await
+}
+
+/// Mint the access, ID and refresh tokens for a signed-in user.
+async fn issue_user_tokens(
+    state: &AppState,
+    tenant: &str,
+    client_id: &str,
+    user_id: &str,
+    granted_scope: &str,
+    nonce: Option<&str>,
+    now: OffsetDateTime,
+) -> Result<Json<TokenResponse>, OAuthFailure> {
+    let advertised = state.config.public_base_url();
+    let issuer = format!("{advertised}/{tenant}/v2.0");
+
+    let (user_principal_name, display_name) = {
+        let directory = state.store.read().await;
+        let user = directory.users.get(user_id).ok_or_else(|| {
+            oauth_error::no_grant("AADSTS50034: The user account does not exist in the directory.")
+        })?;
+        (user.user_principal_name.clone(), user.display_name.clone())
+    };
+
+    // `offline_access` and `openid` govern what is issued but are not resource permissions, so
+    // they do not belong in the access token's scp claim.
+    let wants_refresh = granted_scope
+        .split_whitespace()
+        .any(|scope| scope == "offline_access");
+    let resource_scopes: Vec<&str> = granted_scope
+        .split_whitespace()
+        .filter(|scope| !crate::auth::authorize::is_oidc_scope(scope))
+        .collect();
+
+    let (access_token, expires_in) = issue_user_token(
+        &state.signing_key,
+        crate::auth::token::UserTokenRequest {
+            audience: &advertised,
+            issuer: &issuer,
+            tenant_id: tenant,
+            client_id,
+            user_id,
+            user_principal_name: &user_principal_name,
+            display_name: &display_name,
+            scope: &resource_scopes.join(" "),
+            ttl_seconds: state.config.token_ttl_seconds,
+        },
+        now,
+    )
+    .map_err(|error| oauth_error::server_error(error.to_string()))?;
+
+    let id_token = crate::auth::token::issue_id_token(
+        &state.signing_key,
+        crate::auth::token::IdTokenRequest {
+            issuer: &issuer,
+            tenant_id: tenant,
+            client_id,
+            user_id,
+            user_principal_name: &user_principal_name,
+            display_name: &display_name,
+            nonce,
+            ttl_seconds: state.config.token_ttl_seconds,
+        },
+        now,
+    )
+    .map_err(|error| oauth_error::server_error(error.to_string()))?;
+
+    let refresh = if wants_refresh {
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        let mut sessions = state.sessions.lock().await;
+        sessions.evict_expired(now);
+        sessions.store_refresh_token(
+            token.clone(),
+            crate::auth::sessions::RefreshToken {
+                client_id: client_id.to_string(),
+                user_id: user_id.to_string(),
+                scope: granted_scope.to_string(),
+                expires_at: crate::auth::sessions::refresh_expiry(now),
+            },
+        );
+        Some(token)
+    } else {
+        None
+    };
+
+    Ok(Json(TokenResponse {
+        token_type: "Bearer",
+        expires_in,
+        ext_expires_in: expires_in,
+        access_token,
+        scope: Some(resource_scopes.join(" ")),
+        id_token: Some(id_token),
+        refresh_token: refresh,
+    }))
+}
+
+/// Verify a client secret when one is presented.
+///
+/// A public client has no secret and proves itself with PKCE instead, so an absent secret is not
+/// an error here. A wrong one is.
+async fn authenticate_client_if_secret_presented(
+    state: &AppState,
+    client_id: &str,
+    headers: &HeaderMap,
+    request: &TokenRequest,
+    now: OffsetDateTime,
+) -> Result<(), OAuthFailure> {
+    let secret = request
+        .client_secret
+        .clone()
+        .or_else(|| basic_auth(headers).map(|(_, secret)| secret));
+    let Some(secret) = secret else {
+        return Ok(());
+    };
+
+    let directory = state.store.read().await;
+    if directory
+        .matching_credential(client_id, &secret, now)
+        .is_none()
+    {
+        warn!(client_id, "rejected a code exchange with an invalid secret");
+        return Err(oauth_error::invalid_client_secret());
+    }
+    Ok(())
 }
 
 /// Read the client's credentials from either `client_secret_post` or `client_secret_basic`.

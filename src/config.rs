@@ -60,6 +60,11 @@ pub struct Config {
     )]
     pub tenant_id: String,
 
+    /// Sign this user in automatically instead of showing the picker, for tests that cannot
+    /// drive a browser. A client may still force the picker with `prompt=login`.
+    #[arg(long, env = "ENTRA_SIM_AUTO_SIGN_IN_USER")]
+    pub auto_sign_in_user: Option<String>,
+
     /// Check each request's token against the permissions Microsoft publishes for the endpoint.
     ///
     /// On by default, so that a client missing a permission fails here the way it would against

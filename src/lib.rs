@@ -25,6 +25,7 @@ pub fn router(state: AppState) -> Router {
         .merge(metadata::router())
         .merge(auth::oidc::router())
         .merge(auth::endpoints::router())
+        .merge(auth::authorize::router())
         .merge(graph::router())
         .layer(TraceLayer::new_for_http())
         .with_state(state)

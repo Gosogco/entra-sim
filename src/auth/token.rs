@@ -44,6 +44,13 @@ pub struct AccessTokenClaims {
     pub scp: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_displayname: Option<String>,
+    /// The signed-in user's principal name. Present only on a delegated token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upn: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferred_username: Option<String>,
 }
 
 /// Everything needed to mint an app-only token.
@@ -83,6 +90,9 @@ pub fn issue_app_token(
         roles: request.roles,
         scp: None,
         app_displayname: request.display_name.map(str::to_string),
+        upn: None,
+        name: None,
+        preferred_username: None,
     };
 
     let mut header = Header::new(Algorithm::RS256);
@@ -103,4 +113,115 @@ pub fn validate(
     validation.set_issuer(&[issuer]);
     validation.validate_nbf = true;
     decode::<AccessTokenClaims>(token, &key.decoding, &validation).map(|data| data.claims)
+}
+
+/// Everything needed to mint a token on behalf of a user.
+pub struct UserTokenRequest<'a> {
+    pub audience: &'a str,
+    pub issuer: &'a str,
+    pub tenant_id: &'a str,
+    pub client_id: &'a str,
+    pub user_id: &'a str,
+    pub user_principal_name: &'a str,
+    pub display_name: &'a str,
+    /// Space-separated delegated permissions the user consented to.
+    pub scope: &'a str,
+    pub ttl_seconds: u64,
+}
+
+/// Mint and sign a delegated access token.
+pub fn issue_user_token(
+    key: &SigningKey,
+    request: UserTokenRequest<'_>,
+    now: OffsetDateTime,
+) -> Result<(String, u64)> {
+    let issued_at = now.unix_timestamp();
+    let claims = AccessTokenClaims {
+        aud: request.audience.to_string(),
+        iss: request.issuer.to_string(),
+        iat: issued_at,
+        nbf: issued_at,
+        exp: issued_at + request.ttl_seconds as i64,
+        appid: request.client_id.to_string(),
+        appidacr: APPIDACR_CLIENT_SECRET.to_string(),
+        // `user` marks a token obtained on behalf of a signed-in user.
+        idtyp: "user".to_string(),
+        // The subject is the user, not the application.
+        oid: request.user_id.to_string(),
+        sub: request.user_id.to_string(),
+        tid: request.tenant_id.to_string(),
+        ver: "2.0".to_string(),
+        // A delegated token carries scopes, never roles; the two are distinct permission sets
+        // and a client must not be able to satisfy an app-only requirement by signing a user in.
+        roles: Vec::new(),
+        scp: Some(request.scope.to_string()),
+        app_displayname: None,
+        upn: Some(request.user_principal_name.to_string()),
+        name: Some(request.display_name.to_string()),
+        preferred_username: Some(request.user_principal_name.to_string()),
+    };
+
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = Some(key.kid.clone());
+    let token = encode(&header, &claims, &key.encoding).context("signing the access token")?;
+    Ok((token, request.ttl_seconds))
+}
+
+/// An OpenID Connect ID token, which describes the signed-in user to the client.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdTokenClaims {
+    /// An ID token is addressed to the client, not to a resource.
+    pub aud: String,
+    pub iss: String,
+    pub iat: i64,
+    pub nbf: i64,
+    pub exp: i64,
+    pub oid: String,
+    pub sub: String,
+    pub tid: String,
+    pub ver: String,
+    pub name: String,
+    pub preferred_username: String,
+    /// Echoed from the authorization request, so the client can tie the token to it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
+}
+
+/// Everything needed to mint an ID token.
+pub struct IdTokenRequest<'a> {
+    pub issuer: &'a str,
+    pub tenant_id: &'a str,
+    pub client_id: &'a str,
+    pub user_id: &'a str,
+    pub user_principal_name: &'a str,
+    pub display_name: &'a str,
+    pub nonce: Option<&'a str>,
+    pub ttl_seconds: u64,
+}
+
+/// Mint and sign an ID token.
+pub fn issue_id_token(
+    key: &SigningKey,
+    request: IdTokenRequest<'_>,
+    now: OffsetDateTime,
+) -> Result<String> {
+    let issued_at = now.unix_timestamp();
+    let claims = IdTokenClaims {
+        aud: request.client_id.to_string(),
+        iss: request.issuer.to_string(),
+        iat: issued_at,
+        nbf: issued_at,
+        exp: issued_at + request.ttl_seconds as i64,
+        oid: request.user_id.to_string(),
+        sub: request.user_id.to_string(),
+        tid: request.tenant_id.to_string(),
+        ver: "2.0".to_string(),
+        name: request.display_name.to_string(),
+        preferred_username: request.user_principal_name.to_string(),
+        nonce: request.nonce.map(str::to_string),
+    };
+
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = Some(key.kid.clone());
+    encode(&header, &claims, &key.encoding).context("signing the ID token")
 }

@@ -141,6 +141,9 @@ mod tests {
             roles: roles.iter().map(|role| role.to_string()).collect(),
             scp: None,
             app_displayname: None,
+            upn: None,
+            name: None,
+            preferred_username: None,
         }
     }
 

@@ -116,6 +116,14 @@ pub fn invalid_scope(scope: &str) -> OAuthFailure {
     }
 }
 
+/// The presented grant — a code, a refresh token — is not usable.
+pub fn invalid_grant(description: impl Into<String>) -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new("invalid_grant", 54005, description.into()),
+    }
+}
+
 /// The client authenticated but is not entitled to a token for the resource.
 pub fn no_grant(description: impl Into<String>) -> OAuthFailure {
     OAuthFailure {

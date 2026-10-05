@@ -26,4 +26,6 @@ time = { version = "0.3.55", features = ["serde-well-known", "formatting", "pars
 
 [dev-dependencies]
 base64 = "0.23.1"
+jsonwebtoken = "11.1.0"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+sha2 = "0.10"
