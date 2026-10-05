@@ -58,6 +58,34 @@ impl GraphError {
         )
     }
 
+    /// The request body or a property in it was not acceptable.
+    pub fn invalid_request(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, "Request_BadRequest", message)
+    }
+
+    /// A property was present but of the wrong type.
+    pub fn invalid_property(property: &str) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "Request_BadRequest",
+            format!("Invalid value specified for property {property:?} of resource."),
+        )
+    }
+
+    /// Another object already holds a value that must be unique.
+    pub fn object_conflict(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, "Request_BadRequest", message)
+    }
+
+    /// The simulator itself failed.
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "generalException",
+            message,
+        )
+    }
+
     /// No directory object with the requested identifier exists.
     pub fn resource_not_found(id: &str) -> Self {
         Self::new(

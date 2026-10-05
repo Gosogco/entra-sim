@@ -65,6 +65,19 @@ impl Sim {
         }
     }
 
+    /// An authenticated client holding a bootstrap-client token, for Graph requests.
+    pub async fn graph(&self) -> Graph {
+        let token = self.client_credentials_token().await["access_token"]
+            .as_str()
+            .expect("an access token")
+            .to_string();
+        Graph {
+            base_url: self.base_url.clone(),
+            token,
+            client: self.client.clone(),
+        }
+    }
+
     pub fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
@@ -110,5 +123,77 @@ impl Sim {
             response.status()
         );
         response.json().await.expect("decoding JSON")
+    }
+}
+
+/// A Graph client that presents a bearer token on every request.
+pub struct Graph {
+    base_url: String,
+    token: String,
+    client: reqwest::Client,
+}
+
+impl Graph {
+    fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+        self.client
+            .request(method, format!("{}{}", self.base_url, path))
+            .bearer_auth(&self.token)
+    }
+
+    pub async fn get(&self, path: &str) -> reqwest::Response {
+        self.request(reqwest::Method::GET, path)
+            .send()
+            .await
+            .expect("sending request")
+    }
+
+    /// GET a path, asserting success and returning the decoded body.
+    pub async fn get_ok(&self, path: &str) -> serde_json::Value {
+        let response = self.get(path).await;
+        let status = response.status();
+        let body: serde_json::Value = response.json().await.expect("decoding JSON");
+        assert!(status.is_success(), "GET {path} returned {status}: {body}");
+        body
+    }
+
+    pub async fn post(&self, path: &str, body: &serde_json::Value) -> reqwest::Response {
+        self.request(reqwest::Method::POST, path)
+            .json(body)
+            .send()
+            .await
+            .expect("sending request")
+    }
+
+    /// POST a body, asserting a 201 and returning the created object.
+    pub async fn post_created(&self, path: &str, body: &serde_json::Value) -> serde_json::Value {
+        let response = self.post(path, body).await;
+        let status = response.status();
+        let body: serde_json::Value = response.json().await.expect("decoding JSON");
+        assert_eq!(status, 201, "POST {path} returned {status}: {body}");
+        body
+    }
+
+    pub async fn patch(&self, path: &str, body: &serde_json::Value) -> reqwest::Response {
+        self.request(reqwest::Method::PATCH, path)
+            .json(body)
+            .send()
+            .await
+            .expect("sending request")
+    }
+
+    pub async fn delete(&self, path: &str) -> reqwest::Response {
+        self.request(reqwest::Method::DELETE, path)
+            .send()
+            .await
+            .expect("sending request")
+    }
+
+    /// Request without a bearer token, to check that a route is actually protected.
+    pub async fn get_anonymous(&self, path: &str) -> reqwest::Response {
+        self.client
+            .get(format!("{}{}", self.base_url, path))
+            .send()
+            .await
+            .expect("sending request")
     }
 }

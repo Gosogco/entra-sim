@@ -8,6 +8,7 @@ pub mod config;
 pub mod control;
 pub mod graph;
 pub mod metadata;
+pub mod odata;
 pub mod state;
 pub mod store;
 pub mod tls;
@@ -24,6 +25,7 @@ pub fn router(state: AppState) -> Router {
         .merge(metadata::router())
         .merge(auth::oidc::router())
         .merge(auth::endpoints::router())
+        .merge(graph::router())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

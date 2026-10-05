@@ -16,16 +16,24 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use tokio::sync::RwLock;
 
-use crate::store::model::{Application, PasswordCredential, ServicePrincipal};
+use crate::store::model::{Application, PasswordCredential, ServicePrincipal, User};
 
 /// Everything the simulated tenant contains.
 #[derive(Debug, Default)]
 pub struct Directory {
+    pub users: BTreeMap<String, User>,
     pub applications: BTreeMap<String, Application>,
     pub service_principals: BTreeMap<String, ServicePrincipal>,
 }
 
 impl Directory {
+    pub fn user_by_principal_name(&self, upn: &str) -> Option<&User> {
+        // Entra treats the user principal name as case-insensitive.
+        self.users
+            .values()
+            .find(|user| user.user_principal_name.eq_ignore_ascii_case(upn))
+    }
+
     pub fn application_by_app_id(&self, app_id: &str) -> Option<&Application> {
         self.applications.values().find(|a| a.app_id == app_id)
     }

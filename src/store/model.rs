@@ -16,6 +16,36 @@ pub const MICROSOFT_GRAPH_APP_ID: &str = "00000003-0000-0000-c000-000000000000";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct User {
+    /// Directory object ID.
+    pub id: String,
+    pub user_principal_name: String,
+    pub display_name: String,
+    pub account_enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mail_nickname: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub given_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surname: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mail: Option<String>,
+    #[serde(default)]
+    pub user_type: Option<String>,
+    #[serde(with = "rfc3339")]
+    pub created_date_time: OffsetDateTime,
+    /// Never serialised: Graph has no readable password property, and a password written through
+    /// `passwordProfile` must not come back out on read.
+    #[serde(skip)]
+    pub password: Option<String>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Application {
     /// Directory object ID.
     pub id: String,
