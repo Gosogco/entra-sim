@@ -153,6 +153,7 @@ async fn create(
     let owners = bound_references(fields, "owners@odata.bind", &directory)?;
 
     let mut extra = fields.clone();
+    extra.retain(|property, _| !super::is_write_only_annotation(property));
     for key in [
         "id",
         "displayName",
@@ -266,12 +267,11 @@ async fn update(
             // A bind on PATCH replaces the whole collection, unlike a POST to /$ref.
             "members@odata.bind" => group.members = members.clone(),
             "owners@odata.bind" => group.owners = owners.clone(),
+            other if super::is_write_only_annotation(other) => {}
             other => {
-                if value.is_null() {
-                    group.extra.remove(other);
-                } else {
-                    group.extra.insert(other.to_string(), value.clone());
-                }
+                // An explicit null is stored rather than removed, so a read echoes `null` as
+                // Graph does.
+                group.extra.insert(other.to_string(), value.clone());
             }
         }
     }

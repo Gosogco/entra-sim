@@ -75,7 +75,7 @@ async fn read(
 
 async fn create(
     State(state): State<AppState>,
-    _caller: Caller,
+    caller: Caller,
     Json(body): Json<Value>,
 ) -> Result<impl IntoResponse, GraphError> {
     let fields = body
@@ -114,6 +114,9 @@ async fn create(
     }
 
     let mut principal = ServicePrincipal::for_application(Uuid::new_v4().to_string(), &application);
+    // As with an application, Entra makes the creating identity the initial owner, and the
+    // azuread provider removes it when the configuration declares no owners.
+    principal.owners = vec![caller.claims.oid.clone()];
     apply_all(&mut principal, fields)?;
 
     let body = serialise(&principal)?;
@@ -210,12 +213,11 @@ fn apply_all(
             }
             // Permissions are defined on the application, not here.
             "appRoles" | "oauth2PermissionScopes" | "createdDateTime" => {}
+            other if crate::graph::is_write_only_annotation(other) => {}
             other => {
-                if value.is_null() {
-                    principal.extra.remove(other);
-                } else {
-                    principal.extra.insert(other.to_string(), value.clone());
-                }
+                // An explicit null is stored rather than removed, so a read echoes `null` as
+                // Graph does.
+                principal.extra.insert(other.to_string(), value.clone());
             }
         }
     }

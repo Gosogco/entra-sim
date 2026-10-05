@@ -48,7 +48,7 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/servicePrincipals/{id}/appRoleAssignedTo/{assignment_id}",
-            axum::routing::delete(delete_assignment),
+            get(read_assignment).delete(delete_assignment),
         )
         .route(
             "/servicePrincipals/{id}/appRoleAssignments",
@@ -56,7 +56,7 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/servicePrincipals/{id}/appRoleAssignments/{assignment_id}",
-            axum::routing::delete(delete_assignment),
+            get(read_assignment).delete(delete_assignment),
         )
         .route(
             "/users/{id}/appRoleAssignments",
@@ -64,7 +64,7 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/users/{id}/appRoleAssignments/{assignment_id}",
-            axum::routing::delete(delete_assignment),
+            get(read_assignment).delete(delete_assignment),
         )
         .route("/groups/{id}/appRoleAssignments", get(list_assignments))
         .route(
@@ -246,6 +246,25 @@ async fn create_side(
         .insert(assignment.id.clone(), assignment);
 
     Ok((StatusCode::CREATED, Json(body)))
+}
+
+/// Read one assignment.
+///
+/// The azuread provider reads the assignment back after creating it, so this has to answer even
+/// though the collection endpoints would already reveal the same object.
+async fn read_assignment(
+    State(state): State<AppState>,
+    _caller: Caller,
+    Path((_id, assignment_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, GraphError> {
+    let directory = state.store.read().await;
+    let assignment = directory
+        .app_role_assignments
+        .get(&assignment_id)
+        .ok_or_else(|| GraphError::resource_not_found(&assignment_id))?;
+    Ok(Json(
+        serde_json::to_value(assignment).unwrap_or(Value::Null),
+    ))
 }
 
 async fn delete_assignment(

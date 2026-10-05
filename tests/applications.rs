@@ -472,11 +472,43 @@ async fn delegated_permissions_are_read_from_the_api_block() {
 }
 
 #[tokio::test]
+async fn a_new_application_is_owned_by_its_creator() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let created = create_application(&graph, "Owned App").await;
+    let id = created["id"].as_str().unwrap();
+
+    // Entra makes the creating identity the initial owner. Clients depend on it: the azuread
+    // provider removes that owner when the configuration declares none, and the removal fails
+    // if there was never an owner to remove.
+    let owners = graph
+        .get_ok(&format!("/v1.0/applications/{id}/owners"))
+        .await;
+    let found = owners["value"].as_array().unwrap();
+    assert_eq!(found.len(), 1, "got {owners}");
+    assert_eq!(found[0]["@odata.type"], "#microsoft.graph.servicePrincipal");
+
+    // And it can then be removed, which is exactly what the provider does.
+    let owner_id = found[0]["id"].as_str().unwrap();
+    assert_eq!(
+        graph
+            .delete(&format!("/v1.0/applications/{id}/owners/{owner_id}/$ref"))
+            .await
+            .status(),
+        204
+    );
+    let after = graph
+        .get_ok(&format!("/v1.0/applications/{id}/owners"))
+        .await;
+    assert!(after["value"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn an_application_owner_can_be_added_and_removed() {
     let sim = Sim::start().await;
     let graph = sim.graph().await;
-    let application = create_application(&graph, "Owned App").await;
-    let id = application["id"].as_str().unwrap();
+    let created = create_application(&graph, "Owned App").await;
+    let id = created["id"].as_str().unwrap();
 
     let user = graph
         .post_created(
@@ -505,10 +537,18 @@ async fn an_application_owner_can_be_added_and_removed() {
         204
     );
 
+    // Alongside the creator, who was made the initial owner.
     let owners = graph
         .get_ok(&format!("/v1.0/applications/{id}/owners"))
         .await;
-    assert_eq!(owners["value"][0]["id"], user_id);
+    let ids: Vec<&str> = owners["value"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|owner| owner["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&user_id.as_str()), "got {ids:?}");
+    assert_eq!(ids.len(), 2);
 
     assert_eq!(
         graph
@@ -520,7 +560,83 @@ async fn an_application_owner_can_be_added_and_removed() {
     let after = graph
         .get_ok(&format!("/v1.0/applications/{id}/owners"))
         .await;
-    assert!(after["value"].as_array().unwrap().is_empty());
+    let remaining: Vec<&str> = after["value"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|owner| owner["id"].as_str().unwrap())
+        .collect();
+    assert!(!remaining.contains(&user_id.as_str()));
+}
+
+#[tokio::test]
+async fn owners_can_be_bound_when_the_application_is_created() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+
+    let user = graph
+        .post_created(
+            "/v1.0/users",
+            &json!({
+                "displayName": "Owner",
+                "userPrincipalName": "binder@sim.test",
+                "accountEnabled": true
+            }),
+        )
+        .await;
+    let user_id = user["id"].as_str().unwrap().to_string();
+
+    // Declaring an owner replaces the creator default rather than adding to it.
+    let created = graph
+        .post_created(
+            "/v1.0/applications",
+            &json!({
+                "displayName": "Bound Owner",
+                "owners@odata.bind": [
+                    format!("https://graph.microsoft.com/v1.0/directoryObjects/{user_id}")
+                ]
+            }),
+        )
+        .await;
+    let id = created["id"].as_str().unwrap();
+
+    // The binding directive must not come back as a property of the application.
+    assert!(
+        created["owners@odata.bind"].is_null(),
+        "the write-only directive leaked into the response: {created}"
+    );
+
+    let owners = graph
+        .get_ok(&format!("/v1.0/applications/{id}/owners"))
+        .await;
+    let found = owners["value"].as_array().unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0]["id"], user_id);
+}
+
+#[tokio::test]
+async fn an_explicit_null_is_echoed_rather_than_dropped() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+
+    // The azuread provider writes null for properties the configuration leaves unset and then
+    // compares what it reads back. Dropping the property changes the shape it sees, which shows
+    // up as a permanent diff on every plan.
+    let created = graph
+        .post_created(
+            "/v1.0/applications",
+            &json!({ "displayName": "Nulls", "groupMembershipClaims": null }),
+        )
+        .await;
+    let id = created["id"].as_str().unwrap();
+
+    let fetched = graph.get_ok(&format!("/v1.0/applications/{id}")).await;
+    let fields = fetched.as_object().unwrap();
+    assert!(
+        fields.contains_key("groupMembershipClaims"),
+        "the property should be present and null, got {fetched}"
+    );
+    assert!(fields["groupMembershipClaims"].is_null());
 }
 
 #[tokio::test]

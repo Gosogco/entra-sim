@@ -183,3 +183,63 @@ jobs:
             00000000-0000-0000-0000-000000000001 \
             11111111-1111-1111-1111-111111111111 \
             entra-sim-bootstrap-secret
+
+  terraform:
+    name: Terraform acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Install the toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the simulator
+        run: cargo build --release --locked
+
+      - name: Start the simulator
+        run: |
+          mkdir -p certs
+          ./target/release/entra-sim \
+            --bind 127.0.0.1 --http-port 8080 --https-port 8443 \
+            --tls-san localhost,127.0.0.1 --public-host localhost:8443 \
+            --ca-out certs/ca.pem > simulator.log 2>&1 &
+
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --output /dev/null http://127.0.0.1:8080/__sim__/health; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent --output /dev/null http://127.0.0.1:8080/__sim__/health
+
+      # The real azuread provider against the simulator, configured only by environment: the
+      # same configuration would run against a real tenant with ARM_METADATA_HOSTNAME removed.
+      - name: Apply, verify the plan is empty, then destroy
+        working-directory: terraform/accept
+        env:
+          ARM_METADATA_HOSTNAME: localhost:8443
+          ARM_TENANT_ID: 00000000-0000-0000-0000-000000000001
+          ARM_CLIENT_ID: 11111111-1111-1111-1111-111111111111
+          ARM_CLIENT_SECRET: entra-sim-bootstrap-secret
+        run: |
+          export SSL_CERT_FILE="$GITHUB_WORKSPACE/certs/ca.pem"
+
+          terraform init -input=false
+          terraform apply -auto-approve -input=false
+
+          # The decisive check. A non-empty plan right after apply means the simulator is not
+          # echoing back something the provider wrote, which is the most likely class of bug
+          # here and the one least visible from unit tests.
+          terraform plan -detailed-exitcode -input=false
+
+          terraform destroy -auto-approve -input=false
+
+      - name: Show the simulator log on failure
+        if: failure()
+        run: cat simulator.log

@@ -100,7 +100,7 @@ async fn read(
 
 async fn create(
     State(state): State<AppState>,
-    _caller: Caller,
+    caller: Caller,
     Json(body): Json<Value>,
 ) -> Result<impl IntoResponse, GraphError> {
     let fields = body
@@ -126,6 +126,13 @@ async fn create(
     apply_all(&mut application, fields)?;
 
     let mut directory = state.store.write().await;
+    application.owners = match bound_owners(fields, &directory)? {
+        Some(owners) => owners,
+        // Entra makes the creating identity the initial owner when none is given. Clients
+        // depend on this: the azuread provider removes that owner when the configuration
+        // declares none, and the removal fails if there was never an owner to remove.
+        None => vec![caller.claims.oid.clone()],
+    };
     let body = serialise(&application)?;
     directory
         .applications
@@ -148,11 +155,15 @@ async fn update(
         .map(|application| application.id.clone())
         .ok_or_else(|| GraphError::resource_not_found(&id))?;
 
+    let owners = bound_owners(patch, &directory)?;
     let application = directory
         .applications
         .get_mut(&key)
         .expect("key came from lookup");
     apply_all(application, patch)?;
+    if let Some(owners) = owners {
+        application.owners = owners;
+    }
 
     // Keep the principal's copy of the permissions in step, so an assignment made after the
     // application gained a role still resolves.
@@ -226,12 +237,14 @@ fn apply_all(application: &mut Application, fields: &Map<String, Value>) -> Resu
             // Credentials are managed through addPassword and addKey, which is also how Entra
             // behaves: a secret written directly here would have no secretText to return.
             "passwordCredentials" | "keyCredentials" => {}
+            // Handled by the caller, which resolves the references against the directory.
+            "owners@odata.bind" => {}
+            other if crate::graph::is_write_only_annotation(other) => {}
             other => {
-                if value.is_null() {
-                    application.extra.remove(other);
-                } else {
-                    application.extra.insert(other.to_string(), value.clone());
-                }
+                // An explicit null is stored rather than removed, so a read echoes `null` the
+                // way Graph does. Dropping the property instead makes a client that wrote null
+                // see a different shape coming back.
+                application.extra.insert(other.to_string(), value.clone());
             }
         }
     }
@@ -243,6 +256,32 @@ fn apply_all(application: &mut Application, fields: &Map<String, Value>) -> Resu
         }
     }
     Ok(())
+}
+
+/// Resolve an `@odata.bind` array of object references.
+fn bound_owners(
+    fields: &Map<String, Value>,
+    directory: &crate::store::Directory,
+) -> Result<Option<Vec<String>>, GraphError> {
+    let Some(values) = fields.get("owners@odata.bind") else {
+        return Ok(None);
+    };
+    let values = values
+        .as_array()
+        .ok_or_else(|| GraphError::invalid_property("owners@odata.bind"))?;
+
+    let mut owners = Vec::new();
+    for value in values {
+        let reference = value
+            .as_str()
+            .ok_or_else(|| GraphError::invalid_property("owners@odata.bind"))?;
+        let id = crate::graph::object_id_from_odata_id(reference)?;
+        if !directory.contains_object(&id) {
+            return Err(GraphError::resource_not_found(&id));
+        }
+        owners.push(id);
+    }
+    Ok(Some(owners))
 }
 
 #[derive(Debug, Deserialize)]

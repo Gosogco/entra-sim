@@ -92,6 +92,16 @@ pub fn object_response(
     Json(object).into_response()
 }
 
+/// Whether a property from a request body is a directive or annotation rather than data.
+///
+/// `owners@odata.bind` and its siblings instruct the service to link objects; `@odata.type` and
+/// `@odata.context` describe the payload. None of them is a property of the entity, so storing
+/// one would echo it back on every read — and a client comparing what it wrote with what it
+/// reads would see a difference it cannot reconcile.
+pub fn is_write_only_annotation(property: &str) -> bool {
+    property.starts_with("@odata.") || property.contains("@odata.")
+}
+
 /// Pull the object ID out of an `@odata.id` reference.
 ///
 /// Clients send an absolute URL naming the real Graph host, so only the last path segment can
@@ -110,6 +120,25 @@ pub fn object_id_from_odata_id(odata_id: &str) -> Result<String, error::GraphErr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directives_and_annotations_are_recognised() {
+        for property in [
+            "owners@odata.bind",
+            "members@odata.bind",
+            "@odata.type",
+            "@odata.context",
+            "@odata.id",
+        ] {
+            assert!(
+                is_write_only_annotation(property),
+                "{property} should not be stored as data"
+            );
+        }
+        for property in ["displayName", "appRoles", "web", "tags"] {
+            assert!(!is_write_only_annotation(property));
+        }
+    }
 
     #[test]
     fn an_odata_id_reference_yields_the_trailing_object_id() {

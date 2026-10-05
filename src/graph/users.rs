@@ -76,6 +76,7 @@ async fn create(
     }
 
     let mut extra = fields.clone();
+    extra.retain(|property, _| !crate::graph::is_write_only_annotation(property));
     // Consume the properties the simulator models explicitly so they are not duplicated in the
     // flattened remainder, where they would serialise twice.
     for key in [
@@ -192,14 +193,14 @@ fn apply(user: &mut User, property: &str, value: &Value) -> Result<(), GraphErro
                 user.password = Some(password.to_string());
             }
         }
+        // Directives and annotations describe the request, not the user, so storing one would
+        // echo it back on every read.
+        other if crate::graph::is_write_only_annotation(other) => {}
         // Anything the simulator has no opinion about is kept verbatim, so it round-trips and
-        // does not show up as a perpetual Terraform diff.
+        // does not show up as a perpetual Terraform diff. An explicit null is stored rather
+        // than removed, so a read echoes `null` the way Graph does.
         other => {
-            if value.is_null() {
-                user.extra.remove(other);
-            } else {
-                user.extra.insert(other.to_string(), value.clone());
-            }
+            user.extra.insert(other.to_string(), value.clone());
         }
     }
     Ok(())
