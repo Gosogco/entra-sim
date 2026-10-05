@@ -21,6 +21,8 @@ pub struct Sim {
     pub base_url: String,
     pub public_base_url: String,
     pub tenant_id: String,
+    pub bootstrap_client_id: String,
+    pub bootstrap_client_secret: String,
     pub client: reqwest::Client,
 }
 
@@ -45,6 +47,8 @@ impl Sim {
 
         let tenant_id = config.tenant_id.clone();
         let public_base_url = config.public_base_url();
+        let bootstrap_client_id = config.bootstrap_client_id.clone();
+        let bootstrap_client_secret = config.bootstrap_client_secret.clone();
         let app = entra_sim::router(AppState::new(config, SIGNING_KEY.clone()));
 
         tokio::spawn(async move {
@@ -55,6 +59,8 @@ impl Sim {
             base_url: format!("http://{addr}"),
             public_base_url,
             tenant_id,
+            bootstrap_client_id,
+            bootstrap_client_secret,
             client: reqwest::Client::new(),
         }
     }
@@ -69,6 +75,31 @@ impl Sim {
             .send()
             .await
             .expect("sending request")
+    }
+
+    /// Request a client-credentials token for the simulator's own Graph resource, the way
+    /// go-azure-sdk does.
+    pub async fn client_credentials_token(&self) -> serde_json::Value {
+        self.token_request(&[
+            ("grant_type", "client_credentials"),
+            ("client_id", &self.bootstrap_client_id),
+            ("client_secret", &self.bootstrap_client_secret),
+            ("scope", &format!("{}/.default", self.public_base_url)),
+        ])
+        .await
+        .json()
+        .await
+        .expect("decoding the token response")
+    }
+
+    /// Post a form to the token endpoint and return the raw response.
+    pub async fn token_request(&self, form: &[(&str, &str)]) -> reqwest::Response {
+        self.client
+            .post(self.url(&format!("/{}/oauth2/v2.0/token", self.tenant_id)))
+            .form(form)
+            .send()
+            .await
+            .expect("sending the token request")
     }
 
     pub async fn get_json(&self, path: &str) -> serde_json::Value {

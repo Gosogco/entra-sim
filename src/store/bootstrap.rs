@@ -49,6 +49,7 @@ pub fn install(directory: &mut Directory, config: &Config) {
         password_credentials: Vec::new(),
         key_credentials: Vec::new(),
         created_date_time: now,
+        granted_app_roles: config.bootstrap_app_roles.clone(),
         extra: Default::default(),
     };
 

@@ -51,6 +51,15 @@ pub struct ServicePrincipal {
     pub key_credentials: Vec<KeyCredential>,
     #[serde(with = "rfc3339")]
     pub created_date_time: OffsetDateTime,
+    /// App role values granted to this principal on the Graph resource, which become the
+    /// `roles` claim of its app-only tokens.
+    ///
+    /// Not part of Graph and never serialised: in Entra this is derived by resolving the
+    /// principal's `appRoleAssignments` against the resource application's `appRoles`. It is
+    /// stored pre-resolved until that machinery exists, so no invented property can leak into
+    /// an API response.
+    #[serde(skip)]
+    pub granted_app_roles: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

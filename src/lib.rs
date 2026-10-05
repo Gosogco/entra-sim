@@ -6,6 +6,7 @@
 pub mod auth;
 pub mod config;
 pub mod control;
+pub mod graph;
 pub mod metadata;
 pub mod state;
 pub mod store;
@@ -22,6 +23,7 @@ pub fn router(state: AppState) -> Router {
         .merge(control::router())
         .merge(metadata::router())
         .merge(auth::oidc::router())
+        .merge(auth::endpoints::router())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
