@@ -27,12 +27,33 @@ configuration only.
 ## Running it
 
 ```sh
-docker run --rm -p 8080:8080 -p 8443:8443 -v "$PWD/certs:/certs" \
+mkdir -p certs
+docker run --rm --user "$(id -u):$(id -g)" \
+  -p 8080:8080 -p 8443:8443 \
+  -v "$PWD/certs:/certs" \
   ghcr.io/gosogco/entra-sim:latest
 ```
 
 It serves HTTPS on 8443 and plain HTTP on 8080, generates a CA and server certificate at
 startup, and writes the CA to `/certs/ca.pem` so clients can be told to trust it.
+
+`./certs` is any directory on your machine; the container writes the CA into it, and `$PWD`
+just makes the path absolute, as Docker requires. Create it before the first run, because
+Docker would otherwise create it owned by root. `--user` makes the container write as you
+rather than as its own unprivileged user, so a `ca.pem` left by an earlier run can be replaced
+and you can read what it writes. Without `--user`, give the directory mode `777` instead.
+
+The container is not ready the moment `docker run` returns. It generates an RSA signing key
+first, which takes a few seconds. Wait for it:
+
+```sh
+until curl -sf -o /dev/null http://127.0.0.1:8080/__sim__/health; do sleep 1; done
+```
+
+**The CA changes on every restart.** Each start mints a new one, so a client holding the
+previous `ca.pem` fails with "certificate signed by unknown authority". Read the file again
+after a restart, or pass your own certificate with `--tls-cert` and `--tls-key` to keep one
+across restarts.
 
 A bootstrap application is registered so there is something to authenticate as from a cold
 start:

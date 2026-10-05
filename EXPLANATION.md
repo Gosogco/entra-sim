@@ -605,6 +605,7 @@ There are 177 tests.
 mkdir -p certs
 docker run --rm \
   --name entra-sim \
+  --user "$(id -u):$(id -g)" \
   -p 8080:8080 \
   -p 8443:8443 \
   -v "$PWD/certs:/certs" \
@@ -621,8 +622,62 @@ The container opens two ports:
 The container writes its CA certificate to `certs/ca.pem`. Clients must trust
 this file.
 
-Wait for the container before you use it. It makes an RSA key at startup. This
-can take some seconds:
+### The certs directory
+
+`./certs` is any directory on your machine. It has no special meaning. `$PWD`
+makes the path absolute, which Docker requires on the left of a `-v` flag.
+
+The flag `-v "$PWD/certs:/certs"` is a **bind mount**. It is not a copy. The
+host directory and `/certs` inside the container are the same directory. A
+write on one side is a write to the same file.
+
+Two rules follow. Both stop the container if you break them:
+
+**Rule 1. Make the directory first.** Docker creates a missing directory as
+`root`. The container's own user cannot then write in it. The container stops
+with this error:
+
+```
+Error: writing CA certificate to /certs/ca.pem
+Caused by:
+    Permission denied (os error 13)
+```
+
+**Rule 2. The container must be able to replace the file.** The container runs
+as user 10001. A `ca.pem` that you made, or that `root` made, is not writable
+by that user. Mode 777 on the directory is not enough. Linux needs write
+permission on the **file** to replace it.
+
+`--user "$(id -u):$(id -g)"` solves both rules. The container then writes as
+you. You can read and delete what it writes. A file from an earlier run can be
+replaced.
+
+Without `--user`, give the directory mode 777 instead:
+
+```sh
+mkdir -p certs && chmod 777 certs
+```
+
+### The CA changes on every restart
+
+Each start makes a new CA and a new server certificate. A client that holds the
+previous `ca.pem` then fails with "certificate signed by unknown authority".
+
+Read the file again after each restart. To keep one CA, supply your own
+certificate:
+
+```sh
+-e ENTRA_SIM_TLS_CERT=/certs/server.pem \
+-e ENTRA_SIM_TLS_KEY=/certs/server.key
+```
+
+The signing key behaves the same way. Set `ENTRA_SIM_SIGNING_KEY` to keep a
+stable `kid` across restarts.
+
+### Wait for the container
+
+The container is not ready when `docker run` returns. It makes an RSA key
+first. This takes some seconds:
 
 ```sh
 until curl -sf -o /dev/null http://127.0.0.1:8080/__sim__/health; do sleep 1; done
@@ -988,7 +1043,9 @@ serves.
 
 | Symptom | Cause | Action |
 |---|---|---|
+| `Permission denied (os error 13)` at startup | The CA directory or an old `ca.pem` is not writable by the container | Add `--user "$(id -u):$(id -g)"`, or `chmod 777` the directory |
 | `certificate signed by unknown authority` | The client does not trust the CA | Set `SSL_CERT_FILE` to `ca.pem` |
+| `certificate signed by unknown authority` after a restart | The CA is new. The client holds the old one. | Read `ca.pem` again, or set `ENTRA_SIM_TLS_CERT` and `ENTRA_SIM_TLS_KEY` |
 | `Invalid audience` on a Graph call | `ENTRA_SIM_PUBLIC_HOST` is not the address the client uses | Make the two the same |
 | `400 invalid_scope` | The `scope` names another resource | Use `<public-host>/.default` |
 | `403 Authorization_RequestDenied` | The token has no required permission | Add an app role assignment, or set `ENTRA_SIM_ENFORCE_PERMISSIONS=false` |
