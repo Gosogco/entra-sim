@@ -1,0 +1,13 @@
+# Everything the image does not need. Keeping target/ out matters most: it is large and its
+# host-built artefacts would be invalidated by the builder anyway.
+target/
+.git/
+.github/
+contract/
+scripts/
+tests/
+terraform/
+*.md
+.gitignore
+.dockerignore
+Dockerfile
