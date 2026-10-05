@@ -1,0 +1,185 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to a branch makes the in-flight run redundant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Fewer, larger compilation units; faster than the default for a CI run that builds once.
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  rust:
+    name: Format, lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      # Warnings are errors here so that a lint cannot accumulate unnoticed.
+      - name: Lint
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+  generated-files:
+    name: Generated files are up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The Graph permission catalogue, the directory role templates and the per-endpoint
+      # requirement table are all generated from Microsoft's published documentation. Checking
+      # them here catches a hand-edit, and reports upstream changes as a diff rather than as a
+      # silent drift between the simulator and the real service.
+      - name: Fetch the Microsoft Graph documentation
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/microsoftgraph/microsoft-graph-docs-contrib /tmp/graph-docs
+          git -C /tmp/graph-docs sparse-checkout set --no-cone \
+            '/concepts/permissions-reference.md' \
+            '/api-reference/v1.0/includes/permissions/*' \
+            '/api-reference/v1.0/api/*'
+
+      - name: Fetch the Microsoft Entra documentation
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/MicrosoftDocs/entra-docs /tmp/entra-docs
+          git -C /tmp/entra-docs sparse-checkout set --no-cone \
+            '/docs/identity/role-based-access-control/permissions-reference.md'
+
+      - name: Regenerate
+        run: |
+          scripts/generate-graph-permissions.py \
+            /tmp/graph-docs/concepts/permissions-reference.md \
+            src/graph/graph_permissions.json
+          scripts/generate-directory-roles.py \
+            /tmp/entra-docs/docs/identity/role-based-access-control/permissions-reference.md \
+            src/graph/directory_roles.json
+          scripts/generate-permission-requirements.py \
+            /tmp/graph-docs/api-reference/v1.0 \
+            src/auth/permission_requirements.json
+
+      - name: Report any drift
+        run: |
+          if ! git diff --quiet; then
+            echo "::warning::A generated file differs from the published documentation."
+            echo "Regenerate with scripts/generate-*.py and commit the result."
+            git --no-pager diff --stat
+          fi
+
+  container:
+    name: Container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: entra-sim:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Building is not enough: the point of the image is that it answers requests, and a
+      # misconfigured entrypoint or a missing runtime dependency only shows up when it runs.
+      - name: Check the image serves requests
+        run: |
+          mkdir -p certs && chmod 777 certs
+          docker run --detach --name entra-sim \
+            --publish 8080:8080 --publish 8443:8443 \
+            --volume "$PWD/certs:/certs" \
+            entra-sim:ci
+
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --output /dev/null http://127.0.0.1:8080/__sim__/health; then
+              break
+            fi
+            sleep 1
+          done
+
+          curl --fail --silent http://127.0.0.1:8080/__sim__/health
+          curl --fail --silent --cacert certs/ca.pem \
+            https://localhost:8443/metadata/endpoints?api-version=2022-09-01 > /dev/null
+
+          token=$(curl --fail --silent --cacert certs/ca.pem \
+            --data grant_type=client_credentials \
+            --data client_id=11111111-1111-1111-1111-111111111111 \
+            --data client_secret=entra-sim-bootstrap-secret \
+            --data 'scope=https://localhost:8443/.default' \
+            https://localhost:8443/00000000-0000-0000-0000-000000000001/oauth2/v2.0/token \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+          curl --fail --silent --cacert certs/ca.pem \
+            --header "Authorization: Bearer $token" \
+            https://localhost:8443/v1.0/domains > /dev/null
+
+      - name: Show the container log on failure
+        if: failure()
+        run: docker logs entra-sim
+
+  contract:
+    name: Provider contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: contract/envcheck/go.mod
+          cache-dependency-path: contract/envcheck/go.sum
+
+      - name: Build the contract checker
+        run: go build -o envcheck .
+        working-directory: contract/envcheck
+
+      - name: Install the toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the simulator
+        run: cargo build --release --locked
+
+      # This runs the azuread provider's own discovery and client-credentials code against the
+      # simulator, at the SDK version the provider pins. A change in the SDK that breaks the
+      # simulator surfaces here rather than as a confusing provider error.
+      - name: Check the provider contract
+        run: |
+          mkdir -p certs
+          ./target/release/entra-sim \
+            --bind 127.0.0.1 --http-port 8080 --https-port 8443 \
+            --tls-san localhost,127.0.0.1 --public-host localhost:8443 \
+            --ca-out certs/ca.pem &
+
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --output /dev/null http://127.0.0.1:8080/__sim__/health; then
+              break
+            fi
+            sleep 1
+          done
+
+          SSL_CERT_FILE="$PWD/certs/ca.pem" contract/envcheck/envcheck \
+            https://localhost:8443 \
+            00000000-0000-0000-0000-000000000001 \
+            11111111-1111-1111-1111-111111111111 \
+            entra-sim-bootstrap-secret
