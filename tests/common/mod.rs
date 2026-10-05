@@ -65,6 +65,97 @@ impl Sim {
         }
     }
 
+    /// A Graph client whose token carries exactly `roles`, for testing enforcement.
+    ///
+    /// Registers its own application and principal and grants it only the named Graph app
+    /// roles, so the token is minted through the same path a real caller's would be.
+    pub async fn graph_with_roles(&self, roles: &[&str]) -> Graph {
+        let admin = self.graph().await;
+
+        let application = admin
+            .post_created(
+                "/v1.0/applications",
+                &serde_json::json!({ "displayName": "scoped test client" }),
+            )
+            .await;
+        let object_id = application["id"].as_str().unwrap().to_string();
+        let client_id = application["appId"].as_str().unwrap().to_string();
+
+        let principal = admin
+            .post_created(
+                "/v1.0/servicePrincipals",
+                &serde_json::json!({ "appId": client_id.clone() }),
+            )
+            .await;
+        let principal_id = principal["id"].as_str().unwrap().to_string();
+
+        let secret = admin
+            .post_created_or_ok(
+                &format!("/v1.0/applications/{object_id}/addPassword"),
+                &serde_json::json!({}),
+            )
+            .await;
+        let client_secret = secret["secretText"].as_str().unwrap().to_string();
+
+        if !roles.is_empty() {
+            let graph_principal = admin
+                .get_ok(
+                    "/v1.0/servicePrincipals?$filter=appId%20eq%20\
+                     '00000003-0000-0000-c000-000000000000'",
+                )
+                .await;
+            let resource_id = graph_principal["value"][0]["id"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let published = graph_principal["value"][0]["appRoles"]
+                .as_array()
+                .unwrap()
+                .clone();
+
+            for role in roles {
+                let app_role_id = published
+                    .iter()
+                    .find(|published| published["value"] == *role)
+                    .unwrap_or_else(|| panic!("{role} should be a published Graph app role"))["id"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
+                admin
+                    .post_created(
+                        &format!("/v1.0/servicePrincipals/{resource_id}/appRoleAssignedTo"),
+                        &serde_json::json!({
+                            "principalId": principal_id,
+                            "resourceId": resource_id,
+                            "appRoleId": app_role_id
+                        }),
+                    )
+                    .await;
+            }
+        }
+
+        let token = self
+            .token_request(&[
+                ("grant_type", "client_credentials"),
+                ("client_id", &client_id),
+                ("client_secret", &client_secret),
+                ("scope", &format!("{}/.default", self.public_base_url)),
+            ])
+            .await
+            .json::<serde_json::Value>()
+            .await
+            .expect("decoding the token response")["access_token"]
+            .as_str()
+            .expect("an access token")
+            .to_string();
+
+        Graph {
+            base_url: self.base_url.clone(),
+            token,
+            client: self.client.clone(),
+        }
+    }
+
     /// An authenticated client holding a bootstrap-client token, for Graph requests.
     pub async fn graph(&self) -> Graph {
         let token = self.client_credentials_token().await["access_token"]

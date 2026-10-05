@@ -60,6 +60,18 @@ pub struct Config {
     )]
     pub tenant_id: String,
 
+    /// Check each request's token against the permissions Microsoft publishes for the endpoint.
+    ///
+    /// On by default, so that a client missing a permission fails here the way it would against
+    /// the real service. Turn it off to write tests before wiring up consent.
+    #[arg(
+        long,
+        env = "ENTRA_SIM_ENFORCE_PERMISSIONS",
+        default_value_t = true,
+        action = clap::ArgAction::Set,
+    )]
+    pub enforce_permissions: bool,
+
     /// The tenant's initial domain, reported by /domains and /organization. Clients build user
     /// principal names from it.
     #[arg(
@@ -102,6 +114,7 @@ pub struct Config {
             String::from("AppRoleAssignment.ReadWrite.All"),
             String::from("Directory.ReadWrite.All"),
             String::from("Group.ReadWrite.All"),
+            String::from("GroupMember.ReadWrite.All"),
             String::from("RoleManagement.ReadWrite.Directory"),
             String::from("User.ReadWrite.All"),
         ],

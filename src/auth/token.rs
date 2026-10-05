@@ -34,9 +34,14 @@ pub struct AccessTokenClaims {
     pub sub: String,
     pub tid: String,
     pub ver: String,
-    /// App roles granted to the calling service principal on the resource.
+    /// App roles granted to the calling service principal on the resource. Present on an
+    /// app-only token.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub roles: Vec<String>,
+    /// Space-separated delegated permissions. Present on a token obtained on behalf of a user,
+    /// and what distinguishes the two kinds of caller.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scp: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_displayname: Option<String>,
 }
@@ -76,6 +81,7 @@ pub fn issue_app_token(
         tid: request.tenant_id.to_string(),
         ver: "2.0".to_string(),
         roles: request.roles,
+        scp: None,
         app_displayname: request.display_name.map(str::to_string),
     };
 

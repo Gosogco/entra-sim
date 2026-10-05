@@ -1,0 +1,2471 @@
+[
+  {
+    "method": "GET",
+    "path": "/users",
+    "roles": [
+      [
+        "User.Read.All"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "User.ReadBasic.All"
+      ],
+      [
+        "User.Read.All"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "api/user-list.md"
+  },
+  {
+    "method": "POST",
+    "path": "/users",
+    "roles": [
+      [
+        "User.Create"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "User.Create"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/user-post-users-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/users/{id}",
+    "roles": [
+      [
+        "User.Read.All"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "User.Read"
+      ],
+      [
+        "User.ReadWrite"
+      ],
+      [
+        "User.ReadBasic.All"
+      ],
+      [
+        "User.Read.All"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/user-get-permissions.md"
+  },
+  {
+    "method": "PATCH",
+    "path": "/users/{id}",
+    "roles": [
+      [
+        "User.ReadUpdate.All"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "User.ReadUpdate.All"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/user-update-permissions.md"
+  },
+  {
+    "method": "PUT",
+    "path": "/users/{id}",
+    "roles": [
+      [
+        "User.ReadUpdate.All"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "User.ReadUpdate.All"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/user-update-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/users/{id}",
+    "roles": [
+      [
+        "User.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "User.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/user-delete-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/users/{id}/memberOf",
+    "roles": [
+      [
+        "User.Read.All"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "User.Read"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "GroupMember.Read.All"
+      ]
+    ],
+    "source": "includes/permissions/user-list-memberof-permissions.md (overridden: The published table reports no application permission, but the same page's note says application permissions are unsupported only for the /me/memberOf form. The addressed-user form accepts the same permissions as reading the user, plus the group-membership read permission the delegated column lists.)"
+  },
+  {
+    "method": "GET",
+    "path": "/users/{id}/appRoleAssignments",
+    "roles": [
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "AppRoleAssignment.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "AppRoleAssignment.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ]
+    ],
+    "source": "includes/permissions/user-list-approleassignments-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/users/{id}/appRoleAssignments",
+    "roles": [
+      [
+        "AppRoleAssignment.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "AppRoleAssignment.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/user-post-approleassignments-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/users/{id}/appRoleAssignments/{assignment_id}",
+    "roles": [
+      [
+        "AppRoleAssignment.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "AppRoleAssignment.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/user-delete-approleassignments-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/groups",
+    "roles": [
+      [
+        "Group-NestingSupport.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group.ManageProtection.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.Read.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Group-NestingSupport.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group.ManageProtection.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.Read.All"
+      ]
+    ],
+    "source": "includes/permissions/group-list-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/groups",
+    "roles": [
+      [
+        "Group.Create"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-post-groups-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/groups/{id}",
+    "roles": [
+      [
+        "Group-NestingSupport.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group-XTenantIdentitySync.Read.All"
+      ],
+      [
+        "Group.ManageProtection.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.Read.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Group-NestingSupport.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group-XTenantIdentitySync.Read.All"
+      ],
+      [
+        "Group.ManageProtection.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.Read.All"
+      ]
+    ],
+    "source": "includes/permissions/group-get-permissions.md"
+  },
+  {
+    "method": "PATCH",
+    "path": "/groups/{id}",
+    "roles": [
+      [
+        "Group-NestingSupport.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group.ManageProtection.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Group-NestingSupport.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group.ManageProtection.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-update-permissions.md"
+  },
+  {
+    "method": "PUT",
+    "path": "/groups/{id}",
+    "roles": [
+      [
+        "Group-NestingSupport.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group.ManageProtection.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Group-NestingSupport.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group.ManageProtection.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-update-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/groups/{id}",
+    "roles": [
+      [
+        "Group.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Group.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-delete-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/groups/{id}/members",
+    "roles": [
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-list-members-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/groups/{id}/members/$ref",
+    "roles": [
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-list-members-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/groups/{id}/members/$ref",
+    "roles": [
+      [
+        "GroupMember.ReadWrite.All",
+        "Device.ReadWrite.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All",
+        "OrgContact.Read.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All",
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "GroupMember.ReadWrite.All",
+        "Device.Read.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All",
+        "OrgContact.Read.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All",
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "api/group-post-members.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/groups/{id}/members/{member_id}/$ref",
+    "roles": [
+      [
+        "GroupMember.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "GroupMember.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-delete-members-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/groups/{id}/owners",
+    "roles": [
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-list-owners-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/groups/{id}/owners/$ref",
+    "roles": [
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-list-owners-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/groups/{id}/owners/$ref",
+    "roles": [
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-post-owners-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/groups/{id}/owners/{owner_id}/$ref",
+    "roles": [
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-delete-owners-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/groups/{id}/transitiveMembers",
+    "roles": [
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Group.Read.All"
+      ],
+      [
+        "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-list-transitivemembers-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/groups/{id}/memberOf",
+    "roles": [
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group.Read.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "GroupMember.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Group.Read.All"
+      ]
+    ],
+    "source": "includes/permissions/group-list-memberof-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/groups/{id}/appRoleAssignments",
+    "roles": [
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "AppRoleAssignment.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "AppRoleAssignment.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/group-list-approleassignments-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/applications",
+    "roles": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ]
+    ],
+    "source": "includes/permissions/application-list-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/applications",
+    "roles": [
+      [
+        "AppRegistration.Create"
+      ],
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "AppRegistration.Create"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/application-post-applications-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/applications/{id}",
+    "roles": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/application-get-permissions.md"
+  },
+  {
+    "method": "PATCH",
+    "path": "/applications/{id}",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/application-update-permissions.md"
+  },
+  {
+    "method": "PUT",
+    "path": "/applications/{id}",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/application-update-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/applications/{id}",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/application-delete-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/applications/{id}/addPassword",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/application-addpassword-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/applications/{id}/removePassword",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/application-removepassword-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/applications/{id}/addKey",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/application-addkey-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/applications/{id}/removeKey",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/application-removekey-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/applications/{id}/owners",
+    "roles": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/application-list-owners-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/applications/{id}/owners/$ref",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy",
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.Read.All",
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All",
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/application-post-owners-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/applications/{id}/owners/{owner_id}/$ref",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/application-delete-owners-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/applications/{id}/federatedIdentityCredentials",
+    "roles": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/federatedidentitycredential-list-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/applications/{id}/federatedIdentityCredentials",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/federatedidentitycredential-post-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/applications/{id}/federatedIdentityCredentials/{credential_id}",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/federatedidentitycredential-get-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/applications/{id}/federatedIdentityCredentials/{credential_id}",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/federatedidentitycredential-delete-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/servicePrincipals",
+    "roles": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-list-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/servicePrincipals",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-post-serviceprincipals-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/servicePrincipals/{id}",
+    "roles": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-get-permissions.md"
+  },
+  {
+    "method": "PATCH",
+    "path": "/servicePrincipals/{id}",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-update-permissions.md"
+  },
+  {
+    "method": "PUT",
+    "path": "/servicePrincipals/{id}",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-update-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/servicePrincipals/{id}",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-delete-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/servicePrincipals/{id}/owners",
+    "roles": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-list-owners-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/servicePrincipals/{id}/owners/$ref",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy",
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.Read.All",
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All",
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-post-owners-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/servicePrincipals/{id}/owners/{owner_id}/$ref",
+    "roles": [
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-delete-owners-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/servicePrincipals/{id}/memberOf",
+    "roles": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-list-memberof-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/servicePrincipals/{id}/appRoleAssignedTo",
+    "roles": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-list-approleassignedto-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/servicePrincipals/{id}/appRoleAssignedTo",
+    "roles": [
+      [
+        "AppRoleAssignment.ReadWrite.All",
+        "Application.Read.All"
+      ],
+      [
+        "AppRoleAssignment.ReadWrite.All",
+        "Directory.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "AppRoleAssignment.ReadWrite.All",
+        "Application.Read.All"
+      ],
+      [
+        "AppRoleAssignment.ReadWrite.All",
+        "Directory.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-post-approleassignedto-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/servicePrincipals/{id}/appRoleAssignedTo/$ref",
+    "roles": [
+      [
+        "AppRoleAssignment.ReadWrite.All",
+        "Application.Read.All"
+      ],
+      [
+        "AppRoleAssignment.ReadWrite.All",
+        "Directory.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "AppRoleAssignment.ReadWrite.All",
+        "Application.Read.All"
+      ],
+      [
+        "AppRoleAssignment.ReadWrite.All",
+        "Directory.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-post-approleassignedto-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/servicePrincipals/{id}/appRoleAssignedTo/{assignment_id}",
+    "roles": [
+      [
+        "AppRoleAssignment.ReadWrite.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "AppRoleAssignment.ReadWrite.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-delete-approleassignedto-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/servicePrincipals/{id}/appRoleAssignments",
+    "roles": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Application.ReadWrite.OwnedBy"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Application.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-list-approleassignments-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/servicePrincipals/{id}/appRoleAssignments",
+    "roles": [
+      [
+        "AppRoleAssignment.ReadWrite.All",
+        "Application.Read.All"
+      ],
+      [
+        "AppRoleAssignment.ReadWrite.All",
+        "Directory.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "AppRoleAssignment.ReadWrite.All",
+        "Application.Read.All"
+      ],
+      [
+        "AppRoleAssignment.ReadWrite.All",
+        "Directory.Read.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-post-approleassignments-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/servicePrincipals/{id}/appRoleAssignments/{assignment_id}",
+    "roles": [
+      [
+        "AppRoleAssignment.ReadWrite.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "AppRoleAssignment.ReadWrite.All"
+      ],
+      [
+        "Application.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-delete-approleassignments-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/servicePrincipals/{id}/oauth2PermissionGrants",
+    "roles": [
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "DelegatedPermissionGrant.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "DelegatedPermissionGrant.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/serviceprincipal-list-oauth2permissiongrants-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/oauth2PermissionGrants",
+    "roles": [
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "DelegatedPermissionGrant.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "DelegatedPermissionGrant.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/oauth2permissiongrant-list-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/oauth2PermissionGrants",
+    "roles": [
+      [
+        "DelegatedPermissionGrant.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "DelegatedPermissionGrant.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/oauth2permissiongrant-post-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/oauth2PermissionGrants/{id}",
+    "roles": [
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "DelegatedPermissionGrant.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "DelegatedPermissionGrant.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/oauth2permissiongrant-get-permissions.md"
+  },
+  {
+    "method": "PATCH",
+    "path": "/oauth2PermissionGrants/{id}",
+    "roles": [
+      [
+        "DelegatedPermissionGrant.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "DelegatedPermissionGrant.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/oauth2permissiongrant-update-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/oauth2PermissionGrants/{id}",
+    "roles": [
+      [
+        "DelegatedPermissionGrant.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "DelegatedPermissionGrant.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/oauth2permissiongrant-delete-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/directoryRoles",
+    "roles": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/directoryrole-list-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/directoryRoles",
+    "roles": [
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ]
+    ],
+    "source": "includes/permissions/directoryrole-post-directoryroles-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/directoryRoles/{id}",
+    "roles": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ]
+    ],
+    "source": "includes/permissions/directoryrole-get-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/directoryRoles/{id}/members",
+    "roles": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/directoryrole-list-members-permissions.md"
+  },
+  {
+    "method": "POST",
+    "path": "/directoryRoles/{id}/members/$ref",
+    "roles": [
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ]
+    ],
+    "source": "includes/permissions/directoryrole-post-members-permissions.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/directoryRoles/{id}/members/{member_id}/$ref",
+    "roles": [
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ]
+    ],
+    "source": "includes/permissions/directoryrole-delete-member-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/directoryRoleTemplates",
+    "roles": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ]
+    ],
+    "source": "includes/permissions/directoryroletemplate-list-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/directoryRoleTemplates/{id}",
+    "roles": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ]
+    ],
+    "source": "includes/permissions/directoryroletemplate-get-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/roleManagement/directory/roleDefinitions",
+    "roles": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "EntitlementManagement.Read.All"
+      ],
+      [
+        "EntitlementManagement.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "EntitlementManagement.Read.All"
+      ],
+      [
+        "EntitlementManagement.ReadWrite.All"
+      ]
+    ],
+    "source": "api/rbacapplication-list-roledefinitions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/roleManagement/directory/roleDefinitions/{id}",
+    "roles": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "EntitlementManagement.Read.All"
+      ],
+      [
+        "EntitlementManagement.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "EntitlementManagement.Read.All"
+      ],
+      [
+        "EntitlementManagement.ReadWrite.All"
+      ]
+    ],
+    "source": "api/unifiedroledefinition-get.md"
+  },
+  {
+    "method": "GET",
+    "path": "/roleManagement/directory/roleAssignments",
+    "roles": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "RoleManagement.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "EntitlementManagement.Read.All"
+      ],
+      [
+        "EntitlementManagement.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "RoleManagement.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "EntitlementManagement.Read.All"
+      ],
+      [
+        "EntitlementManagement.ReadWrite.All"
+      ]
+    ],
+    "source": "api/rbacapplication-list-roleassignments.md"
+  },
+  {
+    "method": "POST",
+    "path": "/roleManagement/directory/roleAssignments",
+    "roles": [
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "EntitlementManagement.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "EntitlementManagement.ReadWrite.All"
+      ]
+    ],
+    "source": "api/rbacapplication-post-roleassignments.md"
+  },
+  {
+    "method": "GET",
+    "path": "/roleManagement/directory/roleAssignments/{id}",
+    "roles": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "RoleManagement.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "EntitlementManagement.Read.All"
+      ],
+      [
+        "EntitlementManagement.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.Read.Directory"
+      ],
+      [
+        "RoleManagement.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ],
+      [
+        "EntitlementManagement.Read.All"
+      ],
+      [
+        "EntitlementManagement.ReadWrite.All"
+      ]
+    ],
+    "source": "api/unifiedroleassignment-get.md"
+  },
+  {
+    "method": "DELETE",
+    "path": "/roleManagement/directory/roleAssignments/{id}",
+    "roles": [
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "EntitlementManagement.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "RoleManagement.ReadWrite.Directory"
+      ],
+      [
+        "EntitlementManagement.ReadWrite.All"
+      ]
+    ],
+    "source": "api/unifiedroleassignment-delete.md"
+  },
+  {
+    "method": "GET",
+    "path": "/domains",
+    "roles": [
+      [
+        "Domain.Read.All"
+      ],
+      [
+        "Domain.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Domain.Read.All"
+      ],
+      [
+        "Domain.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ]
+    ],
+    "source": "includes/permissions/domain-list-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/domains/{id}",
+    "roles": [
+      [
+        "Domain.Read.All"
+      ],
+      [
+        "Domain.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Domain.Read.All"
+      ],
+      [
+        "Domain.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ]
+    ],
+    "source": "includes/permissions/domain-get-permissions.md"
+  },
+  {
+    "method": "GET",
+    "path": "/organization",
+    "roles": [
+      [
+        "Organization.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Organization.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "User.Read"
+      ],
+      [
+        "Organization.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Organization.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "api/organization-list.md"
+  },
+  {
+    "method": "GET",
+    "path": "/organization/{id}",
+    "roles": [
+      [
+        "Organization.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Organization.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "User.Read"
+      ],
+      [
+        "Organization.Read.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Organization.ReadWrite.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "api/organization-get.md"
+  },
+  {
+    "method": "POST",
+    "path": "/directoryObjects/getByIds",
+    "roles": [
+      [
+        "Directory.Read.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "Directory.Read.All"
+      ]
+    ],
+    "source": "includes/permissions/directoryobject-getbyids-permissions.md"
+  }
+]

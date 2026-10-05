@@ -5,4 +5,5 @@ pub mod keys;
 pub mod middleware;
 pub mod oauth_error;
 pub mod oidc;
+pub mod permissions;
 pub mod token;
