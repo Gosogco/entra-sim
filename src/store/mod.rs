@@ -16,12 +16,15 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use tokio::sync::RwLock;
 
-use crate::store::model::{Application, PasswordCredential, ServicePrincipal, User};
+use serde_json::Value;
+
+use crate::store::model::{Application, Group, PasswordCredential, ServicePrincipal, User};
 
 /// Everything the simulated tenant contains.
 #[derive(Debug, Default)]
 pub struct Directory {
     pub users: BTreeMap<String, User>,
+    pub groups: BTreeMap<String, Group>,
     pub applications: BTreeMap<String, Application>,
     pub service_principals: BTreeMap<String, ServicePrincipal>,
 }
@@ -59,6 +62,101 @@ impl Directory {
             .iter()
             .find(|credential| credential.accepts(secret, now))
     }
+}
+
+/// The Graph type name of a directory object, as it appears in an `@odata.type` annotation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectKind {
+    User,
+    Group,
+    ServicePrincipal,
+}
+
+impl ObjectKind {
+    pub fn odata_type(self) -> &'static str {
+        match self {
+            Self::User => "#microsoft.graph.user",
+            Self::Group => "#microsoft.graph.group",
+            Self::ServicePrincipal => "#microsoft.graph.servicePrincipal",
+        }
+    }
+}
+
+impl Directory {
+    /// Find any directory object by ID, whatever its type.
+    ///
+    /// Membership and role assignments refer to objects by ID without naming a collection, so
+    /// resolving one means looking across every collection that can hold a principal.
+    pub fn object(&self, id: &str) -> Option<(ObjectKind, Value)> {
+        if let Some(user) = self.users.get(id) {
+            return Some((ObjectKind::User, annotate(ObjectKind::User, user)));
+        }
+        if let Some(group) = self.groups.get(id) {
+            return Some((ObjectKind::Group, annotate(ObjectKind::Group, group)));
+        }
+        if let Some(principal) = self.service_principals.get(id) {
+            return Some((
+                ObjectKind::ServicePrincipal,
+                annotate(ObjectKind::ServicePrincipal, principal),
+            ));
+        }
+        None
+    }
+
+    /// Whether an object with this ID exists in any collection.
+    pub fn contains_object(&self, id: &str) -> bool {
+        self.users.contains_key(id)
+            || self.groups.contains_key(id)
+            || self.service_principals.contains_key(id)
+    }
+
+    /// Every group the object belongs to directly.
+    pub fn groups_containing(&self, id: &str) -> Vec<&Group> {
+        self.groups
+            .values()
+            .filter(|group| group.members.iter().any(|member| member == id))
+            .collect()
+    }
+
+    /// Members of a group, following nested groups.
+    ///
+    /// Nested groups appear in the result as well as their members, which is what Graph does.
+    /// Cycles are possible in a simulated directory, so visited IDs are tracked.
+    pub fn transitive_members(&self, group_id: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut pending = vec![group_id.to_string()];
+
+        while let Some(current) = pending.pop() {
+            let Some(group) = self.groups.get(&current) else {
+                continue;
+            };
+            for member in &group.members {
+                if !seen.insert(member.clone()) {
+                    continue;
+                }
+                found.push(member.clone());
+                if self.groups.contains_key(member) {
+                    pending.push(member.clone());
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+}
+
+fn annotate<T: serde::Serialize>(kind: ObjectKind, object: &T) -> Value {
+    let mut value = serde_json::to_value(object).unwrap_or(Value::Null);
+    if let Some(fields) = value.as_object_mut() {
+        // A heterogeneous collection needs the type annotation for a client to tell a user from
+        // a group.
+        fields.insert(
+            "@odata.type".to_string(),
+            Value::String(kind.odata_type().to_string()),
+        );
+    }
+    value
 }
 
 /// Shared handle to the directory.

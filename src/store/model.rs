@@ -46,6 +46,38 @@ pub struct User {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Group {
+    /// Directory object ID.
+    pub id: String,
+    pub display_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mail_nickname: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mail: Option<String>,
+    pub mail_enabled: bool,
+    pub security_enabled: bool,
+    /// `Unified` marks a Microsoft 365 group; `DynamicMembership` a dynamic one.
+    #[serde(default)]
+    pub group_types: Vec<String>,
+    #[serde(with = "rfc3339")]
+    pub created_date_time: OffsetDateTime,
+    /// Object IDs of the members.
+    ///
+    /// Not serialised with the group: Graph exposes members as a navigation property reached
+    /// through `/members`, never as a property of the entity body.
+    #[serde(skip)]
+    pub members: Vec<String>,
+    /// Object IDs of the owners, likewise a navigation property.
+    #[serde(skip)]
+    pub owners: Vec<String>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Application {
     /// Directory object ID.
     pub id: String,

@@ -173,6 +173,20 @@ impl Graph {
         body
     }
 
+    /// POST a body, asserting any success status and returning the body. Graph answers some
+    /// actions with 200 and some with 201.
+    pub async fn post_created_or_ok(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> serde_json::Value {
+        let response = self.post(path, body).await;
+        let status = response.status();
+        let body: serde_json::Value = response.json().await.expect("decoding JSON");
+        assert!(status.is_success(), "POST {path} returned {status}: {body}");
+        body
+    }
+
     pub async fn patch(&self, path: &str, body: &serde_json::Value) -> reqwest::Response {
         self.request(reqwest::Method::PATCH, path)
             .json(body)

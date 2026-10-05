@@ -10,6 +10,7 @@
 //! both; only the `@odata.context` differs, and it is built from the request's own prefix.
 
 pub mod error;
+pub mod groups;
 pub mod users;
 
 use axum::Json;
@@ -31,7 +32,7 @@ pub fn router() -> Router<AppState> {
 }
 
 fn resources() -> Router<AppState> {
-    Router::new().merge(users::router())
+    Router::new().merge(users::router()).merge(groups::router())
 }
 
 /// Build a Graph collection response, applying ordering, paging and `$select`.
