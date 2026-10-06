@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/authConfig.ts","./src/main.tsx","./e2e/signin.spec.ts","./vite.config.ts","./playwright.config.ts"],"version":"5.9.3"}

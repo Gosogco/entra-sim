@@ -1,0 +1,7 @@
+node_modules/
+dist/
+# The active configuration. Copy .env.simulator or .env.entra to it.
+.env
+# Playwright output.
+test-results/
+playwright-report/
