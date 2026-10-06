@@ -17,10 +17,13 @@ use crate::state::AppState;
 use crate::store::model::User;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/users", get(list).post(create)).route(
-        "/users/{id}",
-        get(read).patch(update).put(update).delete(delete),
-    )
+    Router::new()
+        .route("/me", get(me))
+        .route("/users", get(list).post(create))
+        .route(
+            "/users/{id}",
+            get(read).patch(update).put(update).delete(delete),
+        )
 }
 
 async fn list(
@@ -37,6 +40,34 @@ async fn list(
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(collection_response(&state, objects, &query, "users"))
+}
+
+/// `GET /me` returns the signed-in user.
+///
+/// Refused for an app-only token. `/me` means "whoever is signed in", and an app-only token has
+/// no user. Real Graph refuses it for the same reason, and a simulator that answered would hide
+/// a client that had asked for the wrong kind of token.
+async fn me(
+    State(state): State<AppState>,
+    caller: Caller,
+    AxumQuery(raw): AxumQuery<RawQuery>,
+) -> Result<impl IntoResponse, GraphError> {
+    let query = raw.validate()?;
+
+    if caller.claims.scp.is_none() {
+        return Err(GraphError::invalid_request(
+            "/me request is only valid with delegated authentication flow.",
+        ));
+    }
+
+    let directory = state.store.read().await;
+    // The token's `oid` names the user it was issued for.
+    let user = directory
+        .users
+        .get(&caller.claims.oid)
+        .ok_or_else(|| GraphError::resource_not_found(&caller.claims.oid))?;
+
+    Ok(object_response(&state, serialise(user)?, &query, "users"))
 }
 
 async fn read(

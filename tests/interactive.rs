@@ -879,3 +879,83 @@ async fn an_unsupported_response_mode_is_still_refused() {
     assert_eq!(response.status(), 400);
     assert!(response.text().await.unwrap().contains("form_post"));
 }
+
+#[tokio::test]
+async fn the_me_endpoint_returns_the_signed_in_user() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let fixture = fixture(&graph).await;
+
+    let tokens = complete_flow(&sim, &fixture, "openid User.Read", Some(VERIFIER)).await;
+    let access = tokens["access_token"].as_str().unwrap();
+
+    let response = sim
+        .client
+        .get(sim.url("/v1.0/me"))
+        .bearer_auth(access)
+        .send()
+        .await
+        .expect("sending the request");
+    assert!(
+        response.status().is_success(),
+        "/me should answer a delegated token, got {}",
+        response.status()
+    );
+
+    let me: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(me["id"], fixture.user_id);
+    assert_eq!(me["userPrincipalName"], fixture.user_principal_name);
+    assert_eq!(me["displayName"], "Alice Example");
+}
+
+#[tokio::test]
+async fn the_me_endpoint_refuses_an_app_only_token() {
+    let sim = Sim::start().await;
+
+    // An app-only token has no user, so there is nobody for /me to describe. Answering would
+    // hide a client that had asked for the wrong kind of token.
+    let token = sim.client_credentials_token().await["access_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let response = sim
+        .client
+        .get(sim.url("/v1.0/me"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "Request_BadRequest");
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("delegated"),
+        "got {body}"
+    );
+}
+
+#[tokio::test]
+async fn the_me_endpoint_needs_a_user_read_scope() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let fixture = fixture(&graph).await;
+
+    // Consenting to nothing leaves the token with no scopes, so enforcement refuses the call.
+    let tokens = complete_flow(&sim, &fixture, "openid", Some(VERIFIER)).await;
+    let response = sim
+        .client
+        .get(sim.url("/v1.0/me"))
+        .bearer_auth(tokens["access_token"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 403);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "Authorization_RequestDenied");
+}

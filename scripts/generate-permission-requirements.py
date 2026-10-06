@@ -41,6 +41,8 @@ import sys
 # Which published operation governs each route the simulator serves. Paths are the matched
 # axum route patterns, without the version prefix.
 ROUTES = [
+    # /me reads the signed-in user, so it carries the same requirement as reading a user.
+    ("GET", "/me", "user-get"),
     ("GET", "/users", "user-list"),
     ("POST", "/users", "user-post-users"),
     ("GET", "/users/{id}", "user-get"),

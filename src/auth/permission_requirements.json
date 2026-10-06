@@ -1,6 +1,48 @@
 [
   {
     "method": "GET",
+    "path": "/me",
+    "roles": [
+      [
+        "User.Read.All"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "scopes": [
+      [
+        "User.Read"
+      ],
+      [
+        "User.ReadWrite"
+      ],
+      [
+        "User.ReadBasic.All"
+      ],
+      [
+        "User.Read.All"
+      ],
+      [
+        "User.ReadWrite.All"
+      ],
+      [
+        "Directory.Read.All"
+      ],
+      [
+        "Directory.ReadWrite.All"
+      ]
+    ],
+    "source": "includes/permissions/user-get-permissions.md"
+  },
+  {
+    "method": "GET",
     "path": "/users",
     "roles": [
       [
