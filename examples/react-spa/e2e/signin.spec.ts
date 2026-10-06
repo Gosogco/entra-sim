@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test'
 
-/// The user Terraform creates in the simulator, matching a real tenant's principal name.
-const USER = 'alice@example.test'
+/// The user Terraform creates in the simulator. Override it to sign in as a real account,
+/// which is the closest the simulator run gets to the real tenant.
+const USER = process.env.E2E_USER ?? 'alice@example.test'
 
 const SIMULATOR = process.env.SIMULATOR_URL ?? 'https://localhost:8443'
 const TENANT = process.env.SIMULATOR_TENANT ?? '00000000-0000-0000-0000-000000000001'
@@ -56,7 +57,9 @@ test('the Graph call shows the user', async ({ page }) => {
   // the call succeeds. This is the assertion that proves the access token is usable, which the
   // ID token claims alone do not.
   await expect(page.getByTestId('me-upn')).toHaveText(USER, { timeout: 15_000 })
-  await expect(page.getByTestId('me-display-name')).toHaveText('Alice Example')
+  await expect(page.getByTestId('me-display-name')).toHaveText(
+    process.env.E2E_DISPLAY_NAME ?? 'Alice Example',
+  )
   await expect(page.getByTestId('me-error')).toHaveCount(0)
 })
 

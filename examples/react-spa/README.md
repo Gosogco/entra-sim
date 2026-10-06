@@ -91,6 +91,22 @@ npm run dev
 Open `http://localhost:5173/` and sign in as `alice@example.test`. The simulator's sign-in page
 lists the tenant's users as buttons.
 
+To sign in as your own account instead, so the run matches your real tenant more closely,
+override the three values rather than editing any file:
+
+```sh
+# the simulator
+-e ENTRA_SIM_TENANT_DOMAIN=your-domain.example
+
+# Terraform
+export TF_VAR_user_principal_name=you@your-domain.example
+
+# or scripts/setup.sh
+UPN=you@your-domain.example DISPLAY_NAME="Your Name" scripts/setup.sh > .env
+```
+
+The Playwright test reads the user from `E2E_USER`, so it follows too.
+
 ## Run it against a real tenant
 
 Apply the same Terraform configuration with `ARM_METADATA_HOSTNAME` unset, so the provider talks
