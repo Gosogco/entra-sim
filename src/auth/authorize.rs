@@ -140,6 +140,15 @@ async fn complete_sign_in(
 }
 
 /// What validating an authorization request established.
+/// Where the authorization response is placed in the redirect URL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResponseMode {
+    /// In the query string. Entra's default for the code flow.
+    Query,
+    /// After a `#`. The only mode msal-browser uses.
+    Fragment,
+}
+
 struct Validated {
     client_id: String,
     /// Object ID of the client's service principal.
@@ -152,6 +161,7 @@ struct Validated {
     wants_default: bool,
     /// Whether the client asked for a refresh token.
     offline_access: bool,
+    response_mode: ResponseMode,
 }
 
 fn validate(
@@ -211,13 +221,19 @@ fn validate(
         }
     }
 
-    if let Some(mode) = request.response_mode.as_deref()
-        && mode != "query"
-    {
-        return Err(Unredirectable(format!(
-            "The response_mode {mode:?} is not supported; this simulator replies with 'query'."
-        )));
-    }
+    // `fragment` is not optional to support: it is the only mode msal-browser will use, by
+    // deliberate design, because a fragment is never sent to a server. `form_post` is left out
+    // rather than half-implemented.
+    let response_mode = match request.response_mode.as_deref() {
+        // Entra's default for the code flow.
+        None | Some("query") => ResponseMode::Query,
+        Some("fragment") => ResponseMode::Fragment,
+        Some(other) => {
+            return Err(Unredirectable(format!(
+                "The response_mode {other:?} is not supported; use 'query' or 'fragment'."
+            )));
+        }
+    };
 
     if let Some(method) = request.code_challenge_method.as_deref()
         && !matches!(method, "S256" | "plain")
@@ -259,6 +275,7 @@ fn validate(
         requested_resource_scopes,
         wants_default,
         offline_access: requested.contains(&"offline_access"),
+        response_mode,
     })
 }
 
@@ -315,21 +332,31 @@ async fn issue_code(
     }
 
     let _ = tenant;
-    let mut location = format!(
-        "{}{}code={}",
-        validated.redirect_uri,
-        if validated.redirect_uri.contains('?') {
-            "&"
-        } else {
-            "?"
-        },
-        urlencode(&code)
-    );
+    let mut parameters = format!("code={}", urlencode(&code));
     // `state` is echoed verbatim; a client uses it to defend against request forgery.
     if let Some(value) = &request.state {
-        location.push_str(&format!("&state={}", urlencode(value)));
+        parameters.push_str(&format!("&state={}", urlencode(value)));
     }
-    found(&location)
+
+    found(&redirect_target(
+        &validated.redirect_uri,
+        validated.response_mode,
+        &parameters,
+    ))
+}
+
+/// Place the response parameters on the redirect URI, in the requested mode.
+///
+/// A registered redirect URI may already carry a query string, so query mode appends with `&`
+/// rather than assuming it can start one.
+fn redirect_target(redirect_uri: &str, mode: ResponseMode, parameters: &str) -> String {
+    match mode {
+        ResponseMode::Fragment => format!("{redirect_uri}#{parameters}"),
+        ResponseMode::Query => {
+            let separator = if redirect_uri.contains('?') { "&" } else { "?" };
+            format!("{redirect_uri}{separator}{parameters}")
+        }
+    }
 }
 
 /// Redirect with 302 Found.
@@ -590,6 +617,33 @@ mod tests {
         assert!(!escaped.contains('<'));
         assert!(!escaped.contains('>'));
         assert!(!escaped.contains('\''));
+    }
+
+    #[test]
+    fn the_response_mode_decides_where_the_parameters_go() {
+        // msal-browser reads the code from the fragment and nothing else.
+        assert_eq!(
+            redirect_target("https://app.test/cb", ResponseMode::Fragment, "code=abc"),
+            "https://app.test/cb#code=abc"
+        );
+        assert_eq!(
+            redirect_target("https://app.test/cb", ResponseMode::Query, "code=abc"),
+            "https://app.test/cb?code=abc"
+        );
+        // A registered URI may already carry a query string.
+        assert_eq!(
+            redirect_target("https://app.test/cb?x=1", ResponseMode::Query, "code=abc"),
+            "https://app.test/cb?x=1&code=abc"
+        );
+        // A fragment is appended whole, so an existing query string is left alone.
+        assert_eq!(
+            redirect_target(
+                "https://app.test/cb?x=1",
+                ResponseMode::Fragment,
+                "code=abc"
+            ),
+            "https://app.test/cb?x=1#code=abc"
+        );
     }
 
     #[test]

@@ -767,3 +767,115 @@ async fn signing_out_returns_to_the_requested_destination() {
         "https://app.example.test/goodbye"
     );
 }
+
+#[tokio::test]
+async fn the_code_is_returned_in_the_fragment_when_asked_for() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let fixture = fixture(&graph).await;
+
+    // msal-browser uses fragment mode and offers no choice, so this is the only path a
+    // single-page application can take.
+    let redirect = browser()
+        .post(sim.url(&format!("/{}/oauth2/v2.0/authorize", sim.tenant_id)))
+        .form(&[
+            ("client_id", fixture.client_id.as_str()),
+            ("response_type", "code"),
+            ("redirect_uri", REDIRECT_URI),
+            ("scope", "openid"),
+            ("state", "opaque-state"),
+            ("response_mode", "fragment"),
+            ("user_id", fixture.user_id.as_str()),
+        ])
+        .send()
+        .await
+        .expect("submitting the sign-in form");
+
+    assert_eq!(redirect.status(), 302);
+    let location = redirect.headers()["location"].to_str().unwrap().to_string();
+
+    let (base, response) = location
+        .split_once('#')
+        .unwrap_or_else(|| panic!("expected a fragment in {location}"));
+    assert_eq!(base, REDIRECT_URI);
+    assert!(response.contains("code="), "got {response}");
+    assert!(response.contains("state=opaque-state"), "got {response}");
+    // A fragment is never sent to a server, which is the reason MSAL insists on it.
+    assert!(
+        !base.contains("code="),
+        "the code must not appear in the query string: {location}"
+    );
+}
+
+#[tokio::test]
+async fn a_fragment_code_still_exchanges_normally() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let fixture = fixture(&graph).await;
+    let client = browser();
+
+    let redirect = client
+        .post(sim.url(&format!("/{}/oauth2/v2.0/authorize", sim.tenant_id)))
+        .form(&[
+            ("client_id", fixture.client_id.as_str()),
+            ("response_type", "code"),
+            ("redirect_uri", REDIRECT_URI),
+            ("scope", "openid offline_access User.Read"),
+            ("response_mode", "fragment"),
+            ("code_challenge", challenge(VERIFIER).as_str()),
+            ("code_challenge_method", "S256"),
+            ("user_id", fixture.user_id.as_str()),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    let location = redirect.headers()["location"].to_str().unwrap().to_string();
+    let fragment = location.split_once('#').expect("a fragment").1;
+    let code = fragment
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("code="))
+        .expect("a code in the fragment");
+
+    let response = client
+        .post(sim.url(&format!("/{}/oauth2/v2.0/token", sim.tenant_id)))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", fixture.client_id.as_str()),
+            ("code", code),
+            ("redirect_uri", REDIRECT_URI),
+            ("code_verifier", VERIFIER),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    let tokens: serde_json::Value = response.json().await.unwrap();
+    assert!(tokens["access_token"].is_string());
+    assert!(tokens["id_token"].is_string());
+    assert!(tokens["refresh_token"].is_string());
+}
+
+#[tokio::test]
+async fn an_unsupported_response_mode_is_still_refused() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let fixture = fixture(&graph).await;
+
+    // form_post is left out rather than half-implemented.
+    let response = browser()
+        .get(sim.url(&format!("/{}/oauth2/v2.0/authorize", sim.tenant_id)))
+        .query(&[
+            ("client_id", fixture.client_id.as_str()),
+            ("response_type", "code"),
+            ("redirect_uri", REDIRECT_URI),
+            ("scope", "openid"),
+            ("response_mode", "form_post"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+    assert!(response.text().await.unwrap().contains("form_post"));
+}
