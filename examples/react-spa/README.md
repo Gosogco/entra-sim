@@ -34,9 +34,16 @@ until curl -sf -o /dev/null http://127.0.0.1:8080/__sim__/health; do sleep 1; do
 installs a local certificate authority into your operating system and browser trust stores:
 
 ```sh
+sudo apt-get install -y libnss3-tools   # certutil, so mkcert can reach the browser store
 mkcert -install
 mkcert -cert-file certs/localhost.pem -key-file certs/localhost-key.pem localhost 127.0.0.1
 ```
+
+`libnss3-tools` is not optional on Linux. Without `certutil`, `mkcert -install` updates the
+system store but not the browser's, and Chromium still refuses the connection.
+
+`mkcert -install` adds a certificate authority to your trust stores. Everything it signs is
+then trusted by your browser and tools, and its private key sits in `$(mkcert -CAROOT)`.
 
 Then restart the simulator with that certificate instead of its own:
 
@@ -147,8 +154,24 @@ The third test needs a forced token refresh. An access token that has already be
 valid until it expires, which is correct, so the page has a button that redeems the refresh token
 to get a new one.
 
-Playwright runs with `ignoreHTTPSErrors`, so the e2e test does not need `mkcert`. That is only
-for interactive use in your own browser.
+Playwright runs with `ignoreHTTPSErrors`, so the e2e test does not need `mkcert`, and CI does
+not install one. That default is why the suite works on a bare runner.
+
+To verify the `mkcert` setup itself, run the suite with verification switched on:
+
+```sh
+export NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem"
+STRICT_TLS=1 npm run e2e
+```
+
+`NODE_EXTRA_CA_CERTS` is required and is easy to miss. Node does **not** read the operating
+system trust store, so `mkcert -install` makes the browser trust the certificate but leaves
+Node refusing it with "unable to verify the first certificate". The browser half of the test
+passes and the API half fails, which reads like a simulator fault and is not one.
+
+The same applies to your own code: a Node client needs `NODE_EXTRA_CA_CERTS`, a Go client needs
+`SSL_CERT_FILE`, and Python `requests` needs `REQUESTS_CA_BUNDLE`. Only the browser uses the
+system store.
 
 ## Files
 

@@ -7,10 +7,14 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     baseURL: 'http://localhost:5173',
-    // The simulator serves a certificate from a CA it generated itself. Trusting it properly
-    // would mean installing mkcert into the runner's trust store, which is awkward on Linux and
-    // is not what these tests are about.
-    ignoreHTTPSErrors: true,
+    // The simulator serves a certificate from a CA it generated itself, which no trust store
+    // knows about. CI therefore does not verify it: installing a CA into the runner's trust
+    // store is awkward on Linux and is not what these tests are about.
+    //
+    // Set STRICT_TLS=1 when the simulator is using an mkcert certificate. The browser then
+    // verifies it like any other site, which is the only way to check that the mkcert setup in
+    // the README actually works.
+    ignoreHTTPSErrors: process.env.STRICT_TLS !== '1',
     trace: 'retain-on-failure',
     ...devices['Desktop Chrome'],
   },
