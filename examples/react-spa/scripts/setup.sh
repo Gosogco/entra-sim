@@ -13,7 +13,8 @@ TENANT="${TENANT:-00000000-0000-0000-0000-000000000001}"
 CLIENT="${CLIENT:-11111111-1111-1111-1111-111111111111}"
 SECRET="${SECRET:-entra-sim-bootstrap-secret}"
 CA="${CA:-}"
-REDIRECT="${REDIRECT:-http://localhost:5173}"
+# The trailing slash matches what the azuread provider requires and what the app sends.
+REDIRECT="${REDIRECT:-http://localhost:5173/}"
 UPN="${UPN:-alice@example.test}"
 DISPLAY_NAME="${DISPLAY_NAME:-Alice Example}"
 

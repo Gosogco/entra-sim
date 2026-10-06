@@ -36,8 +36,11 @@ export const msalConfig: Configuration = {
     // same MSAL code path or the configuration swap proves very little.
     protocolMode: ProtocolMode.AAD,
 
-    redirectUri: window.location.origin,
-    postLogoutRedirectUri: window.location.origin,
+    // With a trailing slash, because that is what is registered. The azuread provider rejects
+    // a redirect URI without a path segment, and Entra matches the value exactly, so
+    // `window.location.origin` on its own would not match.
+    redirectUri: `${window.location.origin}/`,
+    postLogoutRedirectUri: `${window.location.origin}/`,
     navigateToLoginRequestUrl: false,
   },
   cache: {
