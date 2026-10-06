@@ -39,8 +39,16 @@ pub struct OpenIdConfiguration {
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        // MSAL in AAD mode, which is the default, asks for the `/v2.0/` path.
         .route(
             "/{tenant}/v2.0/.well-known/openid-configuration",
+            get(configuration),
+        )
+        // MSAL in OIDC mode, and most generic OIDC libraries, ask without it. Serving both
+        // costs one route and removes a whole class of "the client cannot find the metadata"
+        // failure, which is awkward to diagnose from the client side.
+        .route(
+            "/{tenant}/.well-known/openid-configuration",
             get(configuration),
         )
         .route("/{tenant}/discovery/v2.0/keys", get(keys))

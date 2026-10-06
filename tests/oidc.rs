@@ -88,3 +88,32 @@ async fn jwks_key_is_reachable_from_discovery() {
     let jwks = sim.get_json(path).await;
     assert_eq!(jwks["keys"].as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn discovery_answers_on_both_paths() {
+    let sim = Sim::start().await;
+
+    // MSAL in AAD mode asks for the /v2.0/ path. MSAL in OIDC mode, and generic OIDC
+    // libraries, ask without it. Both must find the same document.
+    let with_version = sim
+        .get_json(&format!(
+            "/{}/v2.0/.well-known/openid-configuration",
+            sim.tenant_id
+        ))
+        .await;
+    let without_version = sim
+        .get_json(&format!(
+            "/{}/.well-known/openid-configuration",
+            sim.tenant_id
+        ))
+        .await;
+
+    assert_eq!(with_version, without_version);
+    // The issuer still names /v2.0, because that is what the tokens carry.
+    assert!(
+        without_version["issuer"]
+            .as_str()
+            .unwrap()
+            .ends_with("/v2.0")
+    );
+}
