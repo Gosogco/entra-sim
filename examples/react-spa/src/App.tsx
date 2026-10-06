@@ -1,7 +1,9 @@
 import { InteractionStatus, type AccountInfo } from '@azure/msal-browser'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
+import { useCallback, useEffect, useState } from 'react'
 
-import { scopes } from './authConfig'
+import { graphBase, scopes } from './authConfig'
+import { fetchMe, GraphError, type GraphUser } from './graph'
 
 export function App() {
   const { instance, accounts, inProgress } = useMsal()
@@ -50,6 +52,7 @@ export function App() {
       </div>
 
       {account && <IdTokenClaims account={account} />}
+      {account && <Me account={account} />}
     </main>
   )
 }
@@ -74,6 +77,72 @@ function IdTokenClaims({ account }: { account: AccountInfo }) {
           <Row label="aud" value={claims.aud} />
         </tbody>
       </table>
+    </section>
+  )
+}
+
+/// The signed-in user, read from Graph.
+///
+/// Separate from the ID token claims on purpose. The claims prove the sign-in worked. This
+/// proves the access token is accepted by an API, which is a different thing and the one more
+/// likely to be misconfigured.
+function Me({ account }: { account: AccountInfo }) {
+  const { instance } = useMsal()
+  const [user, setUser] = useState<GraphUser | null>(null)
+  const [error, setError] = useState<GraphError | Error | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async (forceRefresh = false) => {
+    setLoading(true)
+    setError(null)
+    try {
+      setUser(await fetchMe(instance, account, forceRefresh))
+    } catch (caught) {
+      setUser(null)
+      setError(caught instanceof Error ? caught : new Error(String(caught)))
+    } finally {
+      setLoading(false)
+    }
+  }, [instance, account])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  return (
+    <section>
+      <h2>GET {graphBase}/v1.0/me</h2>
+
+      <div className="row">
+        <button onClick={() => void load(true)} data-testid="me-refresh">
+          Get a new token and reload
+        </button>
+      </div>
+
+      {loading && <p data-testid="me-loading">Loading…</p>}
+
+      {error && (
+        <div data-testid="me-error">
+          <p className="error">
+            {error instanceof GraphError
+              ? `${error.status} ${error.code ?? 'error'}`
+              : 'Request failed'}
+          </p>
+          <pre>{error.message}</pre>
+          <button onClick={() => void load(true)}>Try again</button>
+        </div>
+      )}
+
+      {user && (
+        <table>
+          <tbody>
+            <Row label="displayName" value={user.displayName} testId="me-display-name" />
+            <Row label="userPrincipalName" value={user.userPrincipalName} testId="me-upn" />
+            <Row label="id" value={user.id} testId="me-id" />
+            <Row label="jobTitle" value={user.jobTitle ?? undefined} />
+          </tbody>
+        </table>
+      )}
     </section>
   )
 }

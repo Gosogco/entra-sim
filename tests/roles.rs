@@ -591,3 +591,62 @@ async fn the_tenant_reports_its_initial_domain() {
     let fetched = graph.get_ok(&format!("/v1.0/domains/{name}")).await;
     assert_eq!(fetched["id"], name);
 }
+
+#[tokio::test]
+async fn a_second_grant_for_the_same_triple_is_refused() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let client_id = create_principal(&graph, "Delegating Client").await;
+    let resource_id = graph_principal_id(&graph).await;
+
+    let body = json!({
+        "clientId": client_id,
+        "consentType": "AllPrincipals",
+        "resourceId": resource_id,
+        "scope": "User.Read"
+    });
+
+    let first = graph
+        .post_created("/v1.0/oauth2PermissionGrants", &body)
+        .await;
+    assert!(first["id"].is_string());
+
+    // Entra holds at most one grant per client, resource and principal. Two would make the
+    // effective permissions depend on which grant a reader found first, and a revocation could
+    // appear to do nothing because the other grant still stood.
+    let second = graph.post("/v1.0/oauth2PermissionGrants", &body).await;
+    assert_eq!(second.status(), 400);
+    let error: serde_json::Value = second.json().await.unwrap();
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Only one oauth2PermissionGrant"),
+        "got {error}"
+    );
+
+    // A grant for a different user is a different triple, so it is allowed.
+    let user = graph
+        .post_created(
+            "/v1.0/users",
+            &json!({
+                "displayName": "Other",
+                "userPrincipalName": "other@sim.test",
+                "accountEnabled": true
+            }),
+        )
+        .await;
+    let per_user = graph
+        .post(
+            "/v1.0/oauth2PermissionGrants",
+            &json!({
+                "clientId": client_id,
+                "consentType": "Principal",
+                "principalId": user["id"],
+                "resourceId": resource_id,
+                "scope": "User.Read"
+            }),
+        )
+        .await;
+    assert_eq!(per_user.status(), 201);
+}

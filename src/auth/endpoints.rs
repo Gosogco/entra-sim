@@ -250,13 +250,32 @@ async fn refresh_token(
     authenticate_client_if_secret_presented(state, &issued.client_id, headers, request, now)
         .await?;
 
-    // A refresh cannot widen the grant: the scope comes from what was originally consented.
+    // The consented scopes are read again here, not taken from the refresh token. Entra
+    // invalidates a refresh token when consent is revoked, so a token minted from an old one
+    // must not keep permissions the directory no longer grants. Intersecting with the stored
+    // scope means a refresh can only ever narrow, never widen.
+    let scope = {
+        let directory = state.store.read().await;
+        let consented = directory.consented_scopes(&issued.client_id, &issued.user_id);
+        issued
+            .scope
+            .split_whitespace()
+            .filter(|requested| {
+                // `offline_access` governs issuance rather than access to a resource, so it is
+                // not a permission the directory records.
+                crate::auth::authorize::is_oidc_scope(requested)
+                    || consented.iter().any(|granted| granted == requested)
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+
     issue_user_tokens(
         state,
         tenant,
         &issued.client_id,
         &issued.user_id,
-        &issued.scope,
+        &scope,
         // A refreshed ID token carries no nonce; there was no fresh authorization request to
         // bind it to.
         None,

@@ -959,3 +959,110 @@ async fn the_me_endpoint_needs_a_user_read_scope() {
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["error"]["code"], "Authorization_RequestDenied");
 }
+
+#[tokio::test]
+async fn revoking_consent_narrows_a_refreshed_token() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let fixture = fixture(&graph).await;
+    let client = browser();
+
+    let first = complete_flow(
+        &sim,
+        &fixture,
+        "openid offline_access User.Read",
+        Some(VERIFIER),
+    )
+    .await;
+    assert_eq!(
+        common::decode_claims(first["access_token"].as_str().unwrap())["scp"],
+        "User.Read"
+    );
+    let refresh = first["refresh_token"].as_str().unwrap().to_string();
+
+    // An administrator withdraws the consent the sign-in recorded.
+    let grants = graph.get_ok("/v1.0/oauth2PermissionGrants").await;
+    let grant_id = grants["value"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|grant| grant["scope"].as_str() == Some("User.Read"))
+        .expect("the sign-in should have recorded a grant")["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        graph
+            .delete(&format!("/v1.0/oauth2PermissionGrants/{grant_id}"))
+            .await
+            .status(),
+        204
+    );
+
+    // Entra invalidates the refresh token when consent is withdrawn. Re-reading the directory
+    // at issue time reaches the same outcome: the refreshed token keeps no permission the
+    // directory no longer grants.
+    let response = client
+        .post(sim.url(&format!("/{}/oauth2/v2.0/token", sim.tenant_id)))
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", fixture.client_id.as_str()),
+            ("refresh_token", refresh.as_str()),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+
+    let refreshed: serde_json::Value = response.json().await.unwrap();
+    let claims = common::decode_claims(refreshed["access_token"].as_str().unwrap());
+    assert_eq!(
+        claims["scp"].as_str().unwrap_or_default(),
+        "",
+        "a refreshed token must not keep a revoked permission: {claims}"
+    );
+
+    // And the narrowed token is then refused by the endpoint that needs the permission.
+    let refused = sim
+        .client
+        .get(sim.url("/v1.0/me"))
+        .bearer_auth(refreshed["access_token"].as_str().unwrap())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 403);
+}
+
+#[tokio::test]
+async fn a_refresh_keeps_a_permission_that_is_still_consented() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let fixture = fixture(&graph).await;
+
+    // The narrowing must not be over-eager: an untouched grant keeps working.
+    let first = complete_flow(
+        &sim,
+        &fixture,
+        "openid offline_access User.Read",
+        Some(VERIFIER),
+    )
+    .await;
+
+    let response = browser()
+        .post(sim.url(&format!("/{}/oauth2/v2.0/token", sim.tenant_id)))
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", fixture.client_id.as_str()),
+            ("refresh_token", first["refresh_token"].as_str().unwrap()),
+        ])
+        .send()
+        .await
+        .unwrap();
+
+    let refreshed: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        common::decode_claims(refreshed["access_token"].as_str().unwrap())["scp"],
+        "User.Read"
+    );
+    let _ = graph;
+}

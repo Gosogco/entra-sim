@@ -386,6 +386,23 @@ async fn create_grant(
     }
 
     let mut directory = state.store.write().await;
+
+    // Entra holds at most one grant per client, resource and principal. Two would make the
+    // effective permissions depend on which grant a reader happened to find first, and a
+    // revocation could appear to do nothing because the other grant still stood.
+    let conflicting = directory.oauth2_permission_grants.values().any(|grant| {
+        grant.client_id == body.client_id
+            && grant.resource_id == body.resource_id
+            && grant.principal_id == body.principal_id
+    });
+    if conflicting {
+        return Err(GraphError::object_conflict(
+            "A conflicting object with one or more of the specified property values is present \
+             in the directory. Only one oauth2PermissionGrant may exist for a given client, \
+             resource and principal; update the existing grant instead.",
+        ));
+    }
+
     for (property, id) in [
         ("clientId", &body.client_id),
         ("resourceId", &body.resource_id),

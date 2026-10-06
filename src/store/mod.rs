@@ -113,6 +113,39 @@ impl Directory {
     }
 }
 
+impl Directory {
+    /// The delegated permissions currently consented for a client acting for one user.
+    ///
+    /// Read at the moment a token is issued rather than remembered from the sign-in, so that
+    /// revoking a grant narrows the next token. Entra goes further and invalidates the refresh
+    /// token outright; re-reading the directory reaches the same outcome by the shorter route.
+    pub fn consented_scopes(&self, client_app_id: &str, user_id: &str) -> Vec<String> {
+        let Some(client) = self.service_principal_by_app_id(client_app_id) else {
+            return Vec::new();
+        };
+        let Some(resource) = self.graph_service_principal() else {
+            return Vec::new();
+        };
+
+        let mut scopes: Vec<String> = self
+            .oauth2_permission_grants
+            .values()
+            .filter(|grant| grant.client_id == client.id && grant.resource_id == resource.id)
+            .filter(|grant| {
+                // Tenant-wide consent covers every user; per-user consent covers only its own.
+                grant.consent_type == "AllPrincipals"
+                    || grant.principal_id.as_deref() == Some(user_id)
+            })
+            .flat_map(|grant| grant.scope.split_whitespace())
+            .map(str::to_string)
+            .collect();
+
+        scopes.sort();
+        scopes.dedup();
+        scopes
+    }
+}
+
 /// The Graph type name of a directory object, as it appears in an `@odata.type` annotation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectKind {
