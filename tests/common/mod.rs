@@ -319,6 +319,15 @@ impl Graph {
             .expect("sending request")
     }
 
+    /// GET with an `Origin` header, as a browser sends.
+    pub async fn get_with_origin(&self, path: &str, origin: &str) -> reqwest::Response {
+        self.request(reqwest::Method::GET, path)
+            .header("Origin", origin)
+            .send()
+            .await
+            .expect("sending request")
+    }
+
     /// Request without a bearer token, to check that a route is actually protected.
     pub async fn get_anonymous(&self, path: &str) -> reqwest::Response {
         self.client

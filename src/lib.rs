@@ -6,6 +6,7 @@
 pub mod auth;
 pub mod config;
 pub mod control;
+pub mod cors;
 pub mod graph;
 pub mod metadata;
 pub mod odata;
@@ -27,6 +28,8 @@ pub fn router(state: AppState) -> Router {
         .merge(auth::endpoints::router())
         .merge(auth::authorize::router())
         .merge(graph::router())
+        // Outside the routes, so a preflight request is answered without matching one.
+        .layer(cors::layer(&state.config))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

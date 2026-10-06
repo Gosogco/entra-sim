@@ -60,6 +60,15 @@ pub struct Config {
     )]
     pub tenant_id: String,
 
+    /// Origins allowed to make cross-origin requests. Every origin is allowed when this is
+    /// empty, which is what a browser client needs and what a test simulator can afford.
+    #[arg(
+        long = "cors-allow-origin",
+        env = "ENTRA_SIM_CORS_ALLOW_ORIGIN",
+        value_delimiter = ','
+    )]
+    pub cors_allow_origin: Vec<String>,
+
     /// Load this directory snapshot at startup and on every reset. Use the same shape as
     /// `GET /__sim__/snapshot`.
     #[arg(long, env = "ENTRA_SIM_SEED")]
