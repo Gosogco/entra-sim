@@ -17,12 +17,13 @@ The code is larger than you expected. This section explains why.
 
 | Part | Lines |
 |---|---|
-| Rust source | 8829 |
-| Tests | 4193 |
-| Generated JSON data | 18199 |
-| Python generator scripts | 624 |
+| Rust source | 9051 |
+| Tests | 4738 |
+| Generated JSON data | 18241 |
+| Python generator scripts | 626 |
+| React example, TypeScript | 509 |
 
-The JSON data is 60% of the repository. No person wrote it. Three scripts
+The JSON data is over half of the repository. No person wrote it. Three scripts
 make it from Microsoft documentation. Part 3 explains this data.
 
 ### The four reasons
@@ -75,11 +76,11 @@ You can make the simulator much smaller. Each option has a cost:
 
 | Remove | Saves | Cost |
 |---|---|---|
-| The permission catalogues | 18199 lines | Terraform configurations with real GUIDs stop working |
+| The permission catalogues | 18241 lines | Terraform configurations with real GUIDs stop working |
 | Permission enforcement | ~400 lines | The simulator cannot find missing-permission faults |
 | The interactive flow | ~900 lines | You cannot test browser clients |
 | The OData filter engine | ~700 lines | `$filter` stops working, so most list calls fail |
-| The tests | 4193 lines | You lose all proof that the simulator is correct |
+| The tests | 4738 lines | You lose all proof that the simulator is correct |
 
 ---
 
@@ -298,6 +299,7 @@ src/
   main.rs       Start the process. Open two listeners.
   config.rs     All settings, from flags or environment variables.
   tls.rs        Make a CA and a server certificate.
+  cors.rs       Cross-origin headers, so a browser can connect.
   metadata.rs   The Azure cloud metadata document. Terraform reads this.
   state.rs      The state that all handlers share.
   control.rs    The /__sim__ test control endpoints.
@@ -763,7 +765,42 @@ https://localhost:8443/00000000-0000-0000-0000-000000000001/v2.0/.well-known/ope
 
 ### Test 3. A browser client
 
-Register the redirect URIs on the application:
+`examples/react-spa/` is a complete working example. Read its README first. What follows is the
+background.
+
+A single-page application needs three things from the simulator, and all three are present:
+
+| Need | Why |
+|---|---|
+| Cross-origin headers | The browser refuses the call to the token endpoint without them |
+| `response_mode=fragment` | `msal-browser` uses it and offers no alternative |
+| `GET /me` | The usual first Graph call a signed-in client makes |
+
+MSAL also checks that an authority's host is a genuine Microsoft endpoint, by asking Microsoft's
+instance-discovery service. For a local simulator that call is both wrong and unreachable, so the
+answer is given to MSAL inline:
+
+```ts
+knownAuthorities: ['localhost:8443'],
+cloudDiscoveryMetadata: JSON.stringify({
+  tenant_discovery_endpoint:
+    'https://localhost:8443/<tenant>/v2.0/.well-known/openid-configuration',
+  'api-version': '1.1',
+  metadata: [{
+    preferred_network: 'localhost:8443',
+    preferred_cache: 'localhost:8443',
+    aliases: ['localhost:8443'],
+  }],
+}),
+```
+
+Both are unset against a real tenant. MSAL stays in **AAD** protocol mode for both targets, so
+the simulator is driven through the same MSAL code path as production.
+
+The browser must also trust the certificate. Use `mkcert` and feed the result to
+`ENTRA_SIM_TLS_CERT` and `ENTRA_SIM_TLS_KEY`. That also stops the CA changing on each restart.
+
+To register the redirect URIs on an application:
 
 ```sh
 curl -s --cacert certs/ca.pem -H "Authorization: Bearer $TOKEN" \
@@ -944,6 +981,9 @@ GET  /{tenant}/oauth2/v2.0/logout                         Sign out
 **Graph endpoints.** Each one works under `/v1.0` and under `/beta`.
 
 ```
+Me
+  GET    /me                         The signed-in user. Delegated tokens only.
+
 Users
   GET    /users                      POST   /users
   GET    /users/{id}                 PATCH  /users/{id}
@@ -1032,6 +1072,7 @@ The simulator does not support these:
 | Delta queries | A client that syncs changes fails |
 | More than one tenant | One process serves one tenant |
 | `client_assertion` (`private_key_jwt`) | Use a secret or PKCE |
+| `prompt=none` in a hidden iframe | MSAL uses the refresh token first, so this is only reached after 24 hours |
 | Eventual consistency | A write is readable at once. Real Entra is slower. |
 | Conditional access, PIM, entitlement management | Not present |
 

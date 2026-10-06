@@ -12,7 +12,7 @@ configuration only.
 - **OAuth 2.0 and OpenID Connect**: the client credentials grant, the authorization code grant
   with PKCE, and refresh tokens. Real RS256-signed JWTs, OIDC discovery, and a JWKS endpoint, so
   clients validate tokens exactly as they would in production.
-- **Microsoft Graph**: users, groups with membership and ownership, applications, service
+- **Microsoft Graph**: `/me`, users, groups with membership and ownership, applications, service
   principals, client secrets and certificates, federated identity credentials, app role
   assignments, delegated permission grants, directory roles, domains and organization. Served
   under both `/v1.0` and `/beta`.
@@ -23,6 +23,7 @@ configuration only.
   publishes for that endpoint, so a client missing a permission fails here the way it would
   against the real service.
 - **Terraform**: the `hashicorp/azuread` provider works against it unmodified.
+- **Browser clients**: cross-origin headers, and the fragment response mode MSAL requires.
 
 ## Running it
 
@@ -97,6 +98,26 @@ applies it, checks that the following plan is empty, and destroys it.
 
 Note that the provider forces HTTPS when fetching the metadata document, which is why the
 simulator terminates TLS itself rather than expecting a proxy in front of it.
+
+## Pointing a browser client at it
+
+A single-page application works, including MSAL in its normal AAD protocol mode. The simulator
+sends cross-origin headers, returns the authorization code in the URL fragment as `msal-browser`
+requires, and serves `GET /me`.
+
+Two MSAL settings are needed, because MSAL otherwise asks Microsoft whether the authority's host
+is genuine:
+
+```ts
+knownAuthorities: ['localhost:8443'],
+cloudDiscoveryMetadata: '{"tenant_discovery_endpoint":"…","api-version":"1.1","metadata":[…]}',
+```
+
+Both are unset against a real tenant. Nothing else changes.
+
+`examples/react-spa/` is a working example with the Terraform to create its app registration, and
+a Playwright test that drives the sign-in in a real browser. Its README covers `mkcert`, which the
+browser needs in order to trust the generated certificate.
 
 ## Pointing application code at it
 
