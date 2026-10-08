@@ -7,10 +7,11 @@ use axum::{Json, Router};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 use tracing::warn;
 
 use crate::auth::oauth_error::{self, OAuthFailure};
+use crate::auth::sessions::{Grant, IssuedToken, SubjectKind, TokenKind};
 use crate::auth::token::{AppTokenRequest, issue_app_token, issue_user_token};
 use crate::state::AppState;
 
@@ -114,6 +115,7 @@ async fn client_credentials(
     };
 
     let issuer = format!("{advertised}/{tenant}/v2.0");
+    let roles = directory.granted_graph_role_values(&principal.id);
     let (access_token, expires_in) = issue_app_token(
         &state.signing_key,
         AppTokenRequest {
@@ -123,12 +125,30 @@ async fn client_credentials(
             client_id: &client_id,
             principal_id: &principal.id,
             display_name: Some(&application.display_name),
-            roles: directory.granted_graph_role_values(&principal.id),
+            roles: roles.clone(),
             ttl_seconds: state.config.token_ttl_seconds,
         },
         now,
     )
     .map_err(|error| oauth_error::server_error(error.to_string()))?;
+
+    let issued = IssuedToken {
+        id: uuid::Uuid::new_v4().to_string(),
+        kind: TokenKind::Access,
+        grant: Grant::ClientCredentials,
+        client_id: client_id.clone(),
+        subject_id: principal.id.clone(),
+        subject_kind: SubjectKind::ServicePrincipal,
+        subject_name: application.display_name.clone(),
+        audience: resource.clone(),
+        scopes: Vec::new(),
+        roles,
+        issued_at: now,
+        expires_at: now + Duration::seconds(expires_in as i64),
+    };
+    // Released before taking the session lock, so the two locks are never held together.
+    drop(directory);
+    state.sessions.lock().await.record_issued(issued);
 
     Ok(Json(TokenResponse {
         token_type: "Bearer",
@@ -203,10 +223,13 @@ async fn authorization_code(
     issue_user_tokens(
         state,
         tenant,
-        &issued.client_id,
-        &issued.user_id,
-        &issued.scope,
-        issued.nonce.as_deref(),
+        SignIn {
+            client_id: &issued.client_id,
+            user_id: &issued.user_id,
+            granted_scope: &issued.scope,
+            nonce: issued.nonce.as_deref(),
+            grant: Grant::AuthorizationCode,
+        },
         now,
     )
     .await
@@ -273,27 +296,44 @@ async fn refresh_token(
     issue_user_tokens(
         state,
         tenant,
-        &issued.client_id,
-        &issued.user_id,
-        &scope,
-        // A refreshed ID token carries no nonce; there was no fresh authorization request to
-        // bind it to.
-        None,
+        SignIn {
+            client_id: &issued.client_id,
+            user_id: &issued.user_id,
+            granted_scope: &scope,
+            // A refreshed ID token carries no nonce; there was no fresh authorization request
+            // to bind it to.
+            nonce: None,
+            grant: Grant::RefreshToken,
+        },
         now,
     )
     .await
+}
+
+/// A signed-in user to mint tokens for: through which client, with what consent, and by which
+/// grant the request arrived.
+struct SignIn<'a> {
+    client_id: &'a str,
+    user_id: &'a str,
+    granted_scope: &'a str,
+    nonce: Option<&'a str>,
+    grant: Grant,
 }
 
 /// Mint the access, ID and refresh tokens for a signed-in user.
 async fn issue_user_tokens(
     state: &AppState,
     tenant: &str,
-    client_id: &str,
-    user_id: &str,
-    granted_scope: &str,
-    nonce: Option<&str>,
+    sign_in: SignIn<'_>,
     now: OffsetDateTime,
 ) -> Result<Json<TokenResponse>, OAuthFailure> {
+    let SignIn {
+        client_id,
+        user_id,
+        granted_scope,
+        nonce,
+        grant,
+    } = sign_in;
     let advertised = state.config.public_base_url();
     let issuer = format!("{advertised}/{tenant}/v2.0");
 
@@ -348,10 +388,38 @@ async fn issue_user_tokens(
     )
     .map_err(|error| oauth_error::server_error(error.to_string()))?;
 
+    let mut sessions = state.sessions.lock().await;
+    sessions.evict_expired(now);
+
+    let expires_at = now + Duration::seconds(expires_in as i64);
+    let issued = |kind, audience: &str, scopes: Vec<String>| IssuedToken {
+        id: uuid::Uuid::new_v4().to_string(),
+        kind,
+        grant,
+        client_id: client_id.to_string(),
+        subject_id: user_id.to_string(),
+        subject_kind: SubjectKind::User,
+        subject_name: user_principal_name.clone(),
+        audience: audience.to_string(),
+        scopes,
+        roles: Vec::new(),
+        issued_at: now,
+        expires_at,
+    };
+    // The ID token first, so the access token, the one a reader usually wants, ends up on top
+    // of the newest-first log.
+    sessions.record_issued(issued(TokenKind::Id, client_id, Vec::new()));
+    sessions.record_issued(issued(
+        TokenKind::Access,
+        &advertised,
+        resource_scopes
+            .iter()
+            .map(|scope| scope.to_string())
+            .collect(),
+    ));
+
     let refresh = if wants_refresh {
         let token = uuid::Uuid::new_v4().simple().to_string();
-        let mut sessions = state.sessions.lock().await;
-        sessions.evict_expired(now);
         sessions.store_refresh_token(
             token.clone(),
             crate::auth::sessions::RefreshToken {

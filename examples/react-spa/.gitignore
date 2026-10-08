@@ -5,3 +5,5 @@ dist/
 # Playwright output.
 test-results/
 playwright-report/
+# The CA and any mkcert certificate the README's docker run writes here.
+certs/

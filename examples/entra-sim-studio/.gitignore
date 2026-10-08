@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tsbuildinfo
+# Local overrides of VITE_SIM_URL.
+.env.local
+# Playwright output.
+test-results/
+playwright-report/

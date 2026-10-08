@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::store::Directory;
 use crate::store::model::{
-    AppRoleAssignment, Application, DirectoryRole, Group, OAuth2PermissionGrant, ServicePrincipal,
-    User,
+    AppRoleAssignment, Application, DirectoryRole, FederatedIdentityCredential, Group,
+    OAuth2PermissionGrant, ServicePrincipal, User,
 };
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -33,6 +33,8 @@ pub struct Snapshot {
     pub role_members: Vec<RoleMembers>,
     /// Application and service principal owners.
     pub owners: Vec<OwnerLinks>,
+    /// Federated identity credentials, a navigation property of the application.
+    pub federated_credentials: Vec<FederatedCredentials>,
     /// Client secrets, which an application never discloses on read.
     pub secrets: Vec<SecretValue>,
     /// User passwords, which Graph likewise never returns.
@@ -63,6 +65,15 @@ pub struct OwnerLinks {
     pub object_id: String,
     #[serde(default)]
     pub owners: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FederatedCredentials {
+    /// The owning application's object ID.
+    pub application_id: String,
+    #[serde(default)]
+    pub credentials: Vec<FederatedIdentityCredential>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -128,6 +139,15 @@ impl Snapshot {
                 .filter(|(_, owners)| !owners.is_empty())
                 .map(|(object_id, owners)| OwnerLinks { object_id, owners })
                 .collect(),
+            federated_credentials: directory
+                .applications
+                .values()
+                .filter(|application| !application.federated_identity_credentials.is_empty())
+                .map(|application| FederatedCredentials {
+                    application_id: application.id.clone(),
+                    credentials: application.federated_identity_credentials.clone(),
+                })
+                .collect(),
             secrets: directory
                 .applications
                 .values()
@@ -188,6 +208,11 @@ impl Snapshot {
                 application.owners = links.owners;
             } else if let Some(principal) = directory.service_principals.get_mut(&links.object_id) {
                 principal.owners = links.owners;
+            }
+        }
+        for links in self.federated_credentials {
+            if let Some(application) = directory.applications.get_mut(&links.application_id) {
+                application.federated_identity_credentials = links.credentials;
             }
         }
         for secret in self.secrets {

@@ -137,7 +137,8 @@ in tests that cannot drive a browser.
 
 ## Driving it from a test suite
 
-State is held in memory. Three endpoints under `/__sim__` manage it, outside any Graph path:
+State is held in memory. Endpoints under `/__sim__` inspect and manage it, outside any Graph
+path:
 
 | | |
 |---|---|
@@ -145,6 +146,11 @@ State is held in memory. Three endpoints under `/__sim__` manage it, outside any
 | `POST /__sim__/reset` | return the directory to its seeded state |
 | `GET /__sim__/snapshot` | dump everything, including secrets |
 | `POST /__sim__/snapshot` | replace everything |
+| `GET /__sim__/tokens` | the tokens issued, and the refresh tokens and codes still redeemable, with their expiry |
+
+The token log holds metadata, not tokens, and shows only a prefix of each refresh token and code.
+It keeps the last 1000 issued and empties on reset. `examples/entra-sim-studio/` shows all of
+this in a browser.
 
 `--seed <file>` loads a snapshot at startup and on every reset, so a suite can reset between
 cases and land back on its fixtures.

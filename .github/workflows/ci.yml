@@ -254,7 +254,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: examples/react-spa/package-lock.json
+          cache-dependency-path: |
+            examples/react-spa/package-lock.json
+            examples/entra-sim-studio/package-lock.json
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -319,6 +321,24 @@ jobs:
       # without which a passing sign-in could mean it had used the real service.
       - name: Run the browser test
         working-directory: examples/react-spa
+        run: npm run e2e
+
+      # Its own Playwright install, because the studio may resolve a different Playwright
+      # version, and with it a different browser build.
+      - name: Install the studio
+        working-directory: examples/entra-sim-studio
+        run: |
+          npm ci
+          npx playwright install chromium
+
+      - name: Type-check and build the studio
+        working-directory: examples/entra-sim-studio
+        run: npm run build
+
+      # After the sign-in test on purpose: the simulator then holds a user, an app registration
+      # and issued tokens for the studio to list.
+      - name: Run the studio test
+        working-directory: examples/entra-sim-studio
         run: npm run e2e
 
       - name: Show the logs on failure

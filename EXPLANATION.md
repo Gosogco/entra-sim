@@ -886,8 +886,8 @@ jobs:
 
 ### Control the state
 
-Three endpoints manage the directory. They are under `/__sim__`. No Graph
-path can conflict with this prefix.
+Five endpoints inspect and manage the state. They are under `/__sim__`. No
+Graph path can conflict with this prefix.
 
 | Request | Result |
 |---|---|
@@ -895,6 +895,14 @@ path can conflict with this prefix.
 | `POST /__sim__/reset` | Return to the start state |
 | `GET /__sim__/snapshot` | Write out everything, with secrets |
 | `POST /__sim__/snapshot` | Replace everything |
+| `GET /__sim__/tokens` | Tokens issued, open refresh tokens and codes |
+
+`/__sim__/tokens` lists the last 1000 tokens issued, newest first, with
+their client, subject, scopes or roles and expiry. Expired tokens stay in
+the list. The list holds no token values. Refresh tokens and codes show
+only their first six characters, because they can still be redeemed. A
+reset empties the list. `examples/entra-sim-studio/` shows the snapshot
+and this list in a browser.
 
 These endpoints need no token. A person who can reach the simulator can
 already make a token for any identity in it.

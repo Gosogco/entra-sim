@@ -648,6 +648,53 @@ async fn a_refresh_token_yields_a_fresh_access_token_and_is_rotated() {
 }
 
 #[tokio::test]
+async fn a_sign_in_is_listed_with_its_refresh_token_masked() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let fixture = fixture(&graph).await;
+
+    let tokens = complete_flow(
+        &sim,
+        &fixture,
+        "openid offline_access User.Read",
+        Some(VERIFIER),
+    )
+    .await;
+    let refresh = tokens["refresh_token"].as_str().unwrap();
+
+    let listed = sim.get_json("/__sim__/tokens").await;
+    // The harness's own client-credentials token is in the log too; only the sign-in matters.
+    let for_user: Vec<&serde_json::Value> = listed["issued"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["subjectKind"] == "user")
+        .collect();
+    assert_eq!(for_user.len(), 2);
+
+    let access = for_user[0];
+    assert_eq!(access["kind"], "access");
+    assert_eq!(access["grant"], "authorization_code");
+    assert_eq!(access["subjectId"], fixture.user_id);
+    assert_eq!(access["clientId"], fixture.client_id);
+    assert_eq!(access["scopes"], json!(["User.Read"]));
+
+    let id = for_user[1];
+    assert_eq!(id["kind"], "id");
+    assert_eq!(id["audience"], fixture.client_id);
+
+    let refresh_tokens = listed["refreshTokens"].as_array().unwrap();
+    assert_eq!(refresh_tokens.len(), 1);
+    assert_eq!(refresh_tokens[0]["userId"], fixture.user_id);
+    let prefix = refresh_tokens[0]["prefix"].as_str().unwrap();
+    assert!(refresh.starts_with(prefix) && prefix.len() < refresh.len());
+    // A redeemable value must not leak through the control surface.
+    assert!(!listed.to_string().contains(refresh));
+    // The code was exchanged, so none is pending.
+    assert_eq!(listed["pendingCodes"], json!([]));
+}
+
+#[tokio::test]
 async fn consent_is_recorded_in_the_directory() {
     let sim = Sim::start().await;
     let graph = sim.graph().await;

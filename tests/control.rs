@@ -285,3 +285,82 @@ async fn the_control_prefix_cannot_collide_with_a_graph_path() {
     assert_eq!(sim.get("/__sim__/health").await.status(), 200);
     assert_eq!(sim.get("/v1.0/__sim__/health").await.status(), 404);
 }
+
+#[tokio::test]
+async fn an_issued_token_is_listed_until_a_reset() {
+    let sim = Sim::start().await;
+    let before = sim.get_json("/__sim__/tokens").await;
+    assert_eq!(before["issued"], json!([]));
+
+    let token = sim.client_credentials_token().await;
+    let access_token = token["access_token"].as_str().unwrap();
+    let claims = common::decode_claims(access_token);
+
+    let listed = sim.get_json("/__sim__/tokens").await;
+    let issued = listed["issued"].as_array().unwrap();
+    assert_eq!(issued.len(), 1);
+    let entry = &issued[0];
+    assert_eq!(entry["kind"], "access");
+    assert_eq!(entry["grant"], "client_credentials");
+    assert_eq!(entry["clientId"], sim.bootstrap_client_id);
+    assert_eq!(entry["subjectKind"], "servicePrincipal");
+    assert_eq!(entry["subjectId"], claims["oid"]);
+    assert_eq!(entry["audience"], claims["aud"]);
+    let roles = claims["roles"].as_array().cloned().unwrap_or_default();
+    assert_eq!(entry["roles"], json!(roles));
+
+    // The listed expiry is the token's own, so a reader sees what a client would act on.
+    let expires_at = time::OffsetDateTime::parse(
+        entry["expiresAt"].as_str().unwrap(),
+        &time::format_description::well_known::Rfc3339,
+    )
+    .unwrap();
+    assert_eq!(expires_at.unix_timestamp(), claims["exp"].as_i64().unwrap());
+
+    // The log describes tokens; it never hands one out.
+    assert!(!listed.to_string().contains(access_token));
+
+    sim.post_json("/__sim__/reset", &json!({})).await;
+    let after = sim.get_json("/__sim__/tokens").await;
+    assert_eq!(after["issued"], json!([]));
+}
+
+#[tokio::test]
+async fn federated_credentials_survive_a_snapshot_round_trip() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+
+    let application = graph
+        .post_created("/v1.0/applications", &json!({ "displayName": "Deployer" }))
+        .await;
+    let id = application["id"].as_str().unwrap().to_string();
+    graph
+        .post_created(
+            &format!("/v1.0/applications/{id}/federatedIdentityCredentials"),
+            &json!({
+                "name": "github-main",
+                "issuer": "https://token.actions.githubusercontent.com",
+                "subject": "repo:gosogco/entra-sim:ref:refs/heads/main",
+                "audiences": ["api://AzureADTokenExchange"]
+            }),
+        )
+        .await;
+
+    let snapshot = sim.get_json("/__sim__/snapshot").await;
+    sim.post_json("/__sim__/reset", &json!({})).await;
+    sim.post_json("/__sim__/snapshot", &snapshot).await;
+
+    // A seed or a restored snapshot must not quietly lose the trust a deployment relies on.
+    let restored = graph
+        .get_ok(&format!(
+            "/v1.0/applications/{id}/federatedIdentityCredentials"
+        ))
+        .await;
+    let credentials = restored["value"].as_array().unwrap();
+    assert_eq!(credentials.len(), 1);
+    assert_eq!(credentials[0]["name"], "github-main");
+    assert_eq!(
+        credentials[0]["subject"],
+        "repo:gosogco/entra-sim:ref:refs/heads/main"
+    );
+}

@@ -1,11 +1,14 @@
-//! Short-lived state for the interactive flow: issued authorization codes and refresh tokens.
+//! Short-lived state for the interactive flow: issued authorization codes and refresh tokens,
+//! and a log of the tokens the simulator has issued.
 //!
 //! Kept apart from the directory because none of it is directory data. It is transient,
 //! per-sign-in state that a client exchanges and discards.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+use serde::Serialize;
+use time::serde::rfc3339;
 use time::{Duration, OffsetDateTime};
 use tokio::sync::Mutex;
 
@@ -14,6 +17,9 @@ use tokio::sync::Mutex;
 pub const CODE_LIFETIME_MINUTES: i64 = 10;
 /// Refresh tokens last far longer, which is the point of having them.
 pub const REFRESH_LIFETIME_DAYS: i64 = 90;
+/// How many issued tokens the log remembers. Plenty for an interactive session, and a bound so a
+/// test suite hammering the token endpoint cannot grow it without limit.
+pub const ISSUED_LOG_CAPACITY: usize = 1000;
 
 /// An authorization code waiting to be exchanged.
 #[derive(Debug, Clone)]
@@ -40,10 +46,61 @@ pub struct RefreshToken {
     pub expires_at: OffsetDateTime,
 }
 
+/// A token the simulator issued, kept so `/__sim__/tokens` can show what was handed out.
+///
+/// Metadata only. The signed token is not kept, so reading the log tells you what was issued
+/// without handing you a credential to replay.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssuedToken {
+    pub id: String,
+    pub kind: TokenKind,
+    pub grant: Grant,
+    pub client_id: String,
+    pub subject_id: String,
+    pub subject_kind: SubjectKind,
+    /// The user's principal name, or the application's display name.
+    pub subject_name: String,
+    pub audience: String,
+    /// Delegated permissions, on a token issued for a user.
+    pub scopes: Vec<String>,
+    /// App roles, on an app-only token.
+    pub roles: Vec<String>,
+    #[serde(with = "rfc3339")]
+    pub issued_at: OffsetDateTime,
+    #[serde(with = "rfc3339")]
+    pub expires_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TokenKind {
+    Access,
+    Id,
+}
+
+/// The grant a token was issued under, named as the `grant_type` that requested it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Grant {
+    ClientCredentials,
+    AuthorizationCode,
+    RefreshToken,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubjectKind {
+    User,
+    ServicePrincipal,
+}
+
 #[derive(Debug, Default)]
 pub struct Sessions {
     codes: HashMap<String, AuthorizationCode>,
     refresh_tokens: HashMap<String, RefreshToken>,
+    /// Newest first.
+    issued: VecDeque<IssuedToken>,
 }
 
 impl Sessions {
@@ -72,6 +129,36 @@ impl Sessions {
     pub fn take_refresh_token(&mut self, token: &str, now: OffsetDateTime) -> Option<RefreshToken> {
         let details = self.refresh_tokens.remove(token)?;
         (details.expires_at > now).then_some(details)
+    }
+
+    /// Add a token to the issued log, dropping the oldest entry once the log is full.
+    pub fn record_issued(&mut self, token: IssuedToken) {
+        if self.issued.len() >= ISSUED_LOG_CAPACITY {
+            self.issued.pop_back();
+        }
+        self.issued.push_front(token);
+    }
+
+    /// Issued tokens, newest first.
+    ///
+    /// Expired entries stay, because "has this token expired yet" is one of the things someone
+    /// reading the log wants to find out. Only the capacity bound removes them.
+    pub fn issued(&self) -> impl Iterator<Item = &IssuedToken> {
+        self.issued.iter()
+    }
+
+    /// Authorization codes waiting to be exchanged, with their values.
+    pub fn codes(&self) -> impl Iterator<Item = (&str, &AuthorizationCode)> {
+        self.codes
+            .iter()
+            .map(|(code, details)| (code.as_str(), details))
+    }
+
+    /// Refresh tokens waiting to be redeemed, with their values.
+    pub fn refresh_tokens(&self) -> impl Iterator<Item = (&str, &RefreshToken)> {
+        self.refresh_tokens
+            .iter()
+            .map(|(token, details)| (token.as_str(), details))
     }
 
     /// Drop everything that has expired.
@@ -149,6 +236,39 @@ mod tests {
         sessions.evict_expired(now);
         assert!(sessions.take_code("dead", now).is_none());
         assert!(sessions.take_code("live", now).is_some());
+    }
+
+    fn issued(id: &str, now: OffsetDateTime) -> IssuedToken {
+        IssuedToken {
+            id: id.into(),
+            kind: TokenKind::Access,
+            grant: Grant::ClientCredentials,
+            client_id: "client".into(),
+            subject_id: "principal".into(),
+            subject_kind: SubjectKind::ServicePrincipal,
+            subject_name: "App".into(),
+            audience: "https://sim.test".into(),
+            scopes: Vec::new(),
+            roles: Vec::new(),
+            issued_at: now,
+            expires_at: now + Duration::hours(1),
+        }
+    }
+
+    #[test]
+    fn the_issued_log_is_newest_first_and_drops_the_oldest_when_full() {
+        let now = OffsetDateTime::now_utc();
+        let mut sessions = Sessions::default();
+        for index in 0..=ISSUED_LOG_CAPACITY {
+            sessions.record_issued(issued(&index.to_string(), now));
+        }
+
+        let ids: Vec<&str> = sessions.issued().map(|token| token.id.as_str()).collect();
+        assert_eq!(ids.len(), ISSUED_LOG_CAPACITY);
+        assert_eq!(ids.first(), Some(&ISSUED_LOG_CAPACITY.to_string().as_str()));
+        // The very first entry is the one that made room for the last.
+        assert!(!ids.contains(&"0"));
+        assert_eq!(ids.last(), Some(&"1"));
     }
 
     #[test]
