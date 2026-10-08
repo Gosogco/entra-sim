@@ -32,6 +32,16 @@ resource service principal's own `appRoles` and `oauth2PermissionScopes`. Micros
 principal is created when the simulator starts, so Graph permissions always resolve. A GUID that
 does not resolve is shown as-is, in amber, which usually means a dangling reference.
 
+## Quick start
+
+```sh
+./run.sh           # against whatever the simulator holds
+./run.sh --seed    # first create the React example's app and user (resets the directory)
+```
+
+It starts the simulator in Docker if it isn't running, or reuses the one that is, so it can run
+alongside the React example's `run.sh`. Then it starts the studio on http://localhost:5174/.
+
 ## Run it
 
 **1. Start the simulator**, on the loopback interface only (see the warning below):

@@ -14,6 +14,17 @@ environment file differs. No source file changes between the two.
 | API call | `GET /me`, so the access token is proven usable and not only issued |
 | Permissions | A `403` from the simulator's permission enforcement is shown with its Graph error code |
 
+## Quick start
+
+```sh
+./run.sh
+```
+
+It starts the simulator in Docker if it isn't running, creates the app registration and
+`alice@example.test`, writes `.env`, and starts the site on http://localhost:5173/. Creating the
+objects resets the simulator's directory. The browser still has to accept the simulator's
+certificate once per simulator start; the script says how. The steps below are what it does.
+
 ## Run it against the simulator
 
 **1. Start the simulator.** It needs the `example.test` domain, because the user is
