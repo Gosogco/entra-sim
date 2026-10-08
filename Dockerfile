@@ -41,9 +41,10 @@ COPY --from=builder /build/target/release/entra-sim /usr/local/bin/entra-sim
 USER entrasim
 WORKDIR /home/entrasim
 
-# Defaults chosen so `docker run -p 8080:8080 -p 8443:8443 entra-sim` is immediately usable:
-# the certificate covers the container name and localhost, and the CA lands where a volume can
-# pick it up.
+# Defaults chosen so `docker run -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 entra-sim` is
+# immediately usable: the certificate covers the container name and localhost, and the CA lands
+# where a volume can pick it up. The bind is 0.0.0.0 because port forwarding cannot reach a
+# container listening on its own loopback; the `-p` address decides who on the host can connect.
 ENV ENTRA_SIM_BIND=0.0.0.0 \
     ENTRA_SIM_HTTP_PORT=8080 \
     ENTRA_SIM_HTTPS_PORT=8443 \

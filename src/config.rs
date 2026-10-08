@@ -10,7 +10,7 @@ use clap::Parser;
 #[command(name = "entra-sim", version, about)]
 pub struct Config {
     /// Address to bind both listeners to.
-    #[arg(long, env = "ENTRA_SIM_BIND", default_value = "0.0.0.0")]
+    #[arg(long, env = "ENTRA_SIM_BIND", default_value = "127.0.0.1")]
     pub bind: IpAddr,
 
     /// Port for the plain HTTP listener.

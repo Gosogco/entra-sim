@@ -22,7 +22,7 @@ environment file differs. No source file changes between the two.
 ```sh
 mkdir -p certs
 docker run --rm --user "$(id -u):$(id -g)" \
-  -p 8080:8080 -p 8443:8443 -v "$PWD/certs:/certs" \
+  -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 -v "$PWD/certs:/certs" \
   -e ENTRA_SIM_TENANT_DOMAIN=example.test \
   ghcr.io/gosogco/entra-sim:latest
 
@@ -49,7 +49,7 @@ Then restart the simulator with that certificate instead of its own:
 
 ```sh
 docker run --rm --user "$(id -u):$(id -g)" \
-  -p 8080:8080 -p 8443:8443 -v "$PWD/certs:/certs" \
+  -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 -v "$PWD/certs:/certs" \
   -e ENTRA_SIM_TENANT_DOMAIN=example.test \
   -e ENTRA_SIM_TLS_CERT=/certs/localhost.pem \
   -e ENTRA_SIM_TLS_KEY=/certs/localhost-key.pem \

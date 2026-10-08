@@ -30,13 +30,17 @@ configuration only.
 ```sh
 mkdir -p certs
 docker run --rm --user "$(id -u):$(id -g)" \
-  -p 8080:8080 -p 8443:8443 \
+  -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 \
   -v "$PWD/certs:/certs" \
   ghcr.io/gosogco/entra-sim:latest
 ```
 
 It serves HTTPS on 8443 and plain HTTP on 8080, generates a CA and server certificate at
 startup, and writes the CA to `/certs/ca.pem` so clients can be told to trust it.
+
+`127.0.0.1:` keeps the ports off the network. The simulator has no real authentication: the
+bootstrap secret below is public, and `/__sim__/snapshot` returns every secret it holds. The
+binary run outside a container binds to `127.0.0.1` by default for the same reason.
 
 `./certs` is any directory on your machine; the container writes the CA into it, and `$PWD`
 just makes the path absolute, as Docker requires. Create it before the first run, because
@@ -179,3 +183,7 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 docker build -t entra-sim .
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

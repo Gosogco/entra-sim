@@ -608,8 +608,8 @@ mkdir -p certs
 docker run --rm \
   --name entra-sim \
   --user "$(id -u):$(id -g)" \
-  -p 8080:8080 \
-  -p 8443:8443 \
+  -p 127.0.0.1:8080:8080 \
+  -p 127.0.0.1:8443:8443 \
   -v "$PWD/certs:/certs" \
   ghcr.io/gosogco/entra-sim:latest
 ```
@@ -829,7 +829,7 @@ The authorize endpoint then answers `302` at once.
 services:
   entra-sim:
     image: ghcr.io/gosogco/entra-sim:latest
-    ports: ["8080:8080", "8443:8443"]
+    ports: ["127.0.0.1:8080:8080", "127.0.0.1:8443:8443"]
     volumes: ["./certs:/certs"]
     environment:
       ENTRA_SIM_TLS_SAN: localhost,127.0.0.1,entra-sim
@@ -937,7 +937,7 @@ All settings have a flag and an environment variable.
 
 | Environment variable | Default | Purpose |
 |---|---|---|
-| `ENTRA_SIM_BIND` | `0.0.0.0` | The listen address |
+| `ENTRA_SIM_BIND` | `127.0.0.1` | The listen address. The container image sets `0.0.0.0` |
 | `ENTRA_SIM_HTTP_PORT` | `8080` | The HTTP port |
 | `ENTRA_SIM_HTTPS_PORT` | `8443` | The HTTPS port |
 | `ENTRA_SIM_NO_TLS` | off | Stop the HTTPS listener |
