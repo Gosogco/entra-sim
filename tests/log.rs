@@ -158,3 +158,30 @@ async fn an_unknown_path_is_logged_but_a_studio_file_is_not() {
     let uris: Vec<_> = entries.iter().map(|entry| &entry["uri"]).collect();
     assert_eq!(uris, ["/v1.0/nonexistent"]);
 }
+
+#[tokio::test]
+async fn a_request_in_absolute_form_is_logged_by_its_path() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let sim = Sim::start_with_log(|_| {}).await;
+    // The form HTTP/2 always takes, sent over HTTP/1.1 because the tests serve plain HTTP.
+    let host = sim.base_url.trim_start_matches("http://");
+    let mut stream = tokio::net::TcpStream::connect(host).await.unwrap();
+    stream
+        .write_all(
+            format!(
+                "GET http://{host}/v1.0/nonexistent?$top=1 HTTP/1.1\r\nHost: {host}\r\n\
+                 Connection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+    assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+
+    let entries = requests(&sim).await;
+    let uris: Vec<_> = entries.iter().map(|entry| &entry["uri"]).collect();
+    assert_eq!(uris, ["/v1.0/nonexistent?$top=1"]);
+}

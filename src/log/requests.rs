@@ -43,7 +43,12 @@ pub async fn record(State(state): State<AppState>, request: Request, next: Next)
         return (StatusCode::BAD_REQUEST, "could not read the request body").into_response();
     };
     let method = parts.method.to_string();
-    let uri = parts.uri.to_string();
+    // Path and query only: over HTTP/2 the URI also carries the scheme and host, which would
+    // make the same endpoint read differently depending on the listener.
+    let uri = parts
+        .uri
+        .path_and_query()
+        .map_or_else(|| parts.uri.path().to_string(), ToString::to_string);
     let request_headers = headers(&parts.headers);
 
     // Events raised while the request is handled carry this span's ID, which is how the studio
