@@ -116,6 +116,9 @@ terraform apply
 registration with API permissions, a service principal, a secret and an app role assignment. CI
 applies it, checks that the following plan is empty, and destroys it.
 
+`examples/terraform-users-app-roles/` creates five users and two applications with three app roles
+each, and assigns a mix of those roles to the users.
+
 Note that the provider forces HTTPS when fetching the metadata document, which is why the
 simulator terminates TLS itself rather than expecting a proxy in front of it.
 
