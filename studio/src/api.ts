@@ -1,8 +1,12 @@
 import type { Health, Snapshot, Tokens } from './types'
 
-/// Where the simulator is. The plain HTTP listener by default, so the browser does not have to
-/// trust the simulator's self-generated TLS certificate just to read from it.
-export const simUrl = (import.meta.env.VITE_SIM_URL ?? 'http://localhost:8080').replace(/\/+$/, '')
+/// Where the simulator is. Built, the studio is served by the simulator itself, so it reads from
+/// the origin that served it. Under `npm run dev` it reads from the plain HTTP listener, so the
+/// browser does not have to trust the simulator's self-generated TLS certificate.
+export const simUrl = (
+  import.meta.env.VITE_SIM_URL ??
+  (import.meta.env.DEV ? 'http://localhost:8080' : window.location.origin)
+).replace(/\/+$/, '')
 
 export interface SimState {
   health: Health

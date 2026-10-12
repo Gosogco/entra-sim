@@ -149,14 +149,15 @@ function FailureBanner({ failure, hasData }: { failure: Failure; hasData: boolea
       {failure.kind === 'unreachable' ? (
         <>
           <strong>The simulator is not reachable at {simUrl}.</strong>
-          {hasData && ' Showing the last data received.'} Start it with:
-          <pre>
-            {`docker run --rm -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 \\
-  -e ENTRA_SIM_TENANT_DOMAIN=example.test \\
-  ghcr.io/gosogco/entra-sim:latest`}
-          </pre>
-          Or point the studio elsewhere with <code>VITE_SIM_URL</code> and restart{' '}
-          <code>npm run dev</code>.
+          {hasData && ' Showing the last data received.'} Start it from the entra-sim repository
+          with:
+          <pre>./run.sh</pre>
+          {import.meta.env.DEV && (
+            <>
+              Or point the studio elsewhere with <code>VITE_SIM_URL</code> and restart{' '}
+              <code>npm run dev</code>.
+            </>
+          )}
         </>
       ) : (
         <>
