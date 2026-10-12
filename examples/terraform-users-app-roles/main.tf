@@ -1,8 +1,8 @@
 # Five users, two applications that each define three app roles, and a mix of assignments from
 # the users to those roles.
 #
-# Nothing here is simulator-specific. Against the simulator, set ARM_METADATA_HOSTNAME. Against a
-# real tenant, unset it.
+# The provider is pinned to the simulator on localhost:8443, so this configuration never reaches
+# Microsoft. run.sh starts the simulator and applies it.
 
 terraform {
   required_version = ">= 1.6"
@@ -16,8 +16,12 @@ terraform {
 }
 
 provider "azuread" {
-  # Credentials and the target come from the environment: ARM_TENANT_ID, ARM_CLIENT_ID,
-  # ARM_CLIENT_SECRET, and ARM_METADATA_HOSTNAME for the simulator.
+  # The provider fetches /metadata/endpoints from this host and takes every other endpoint from
+  # it. The credentials are the simulator's bootstrap client.
+  metadata_host = "localhost:8443"
+  tenant_id     = "00000000-0000-0000-0000-000000000001"
+  client_id     = "11111111-1111-1111-1111-111111111111"
+  client_secret = "entra-sim-bootstrap-secret"
 }
 
 # User principal names are built from the tenant's initial domain, so the same configuration
