@@ -44,10 +44,11 @@ RUN apt-get update \
     && apt-get install --no-install-recommends --yes curl \
     && rm -rf /var/lib/apt/lists/*
 
-# An unprivileged user, with /certs and /seed owned by it so a mounted volume can be written.
+# An unprivileged user, with /certs, /seed and /logs owned by it so a mounted volume can be
+# written. A named volume mounted at /logs takes that ownership, so the log survives the container.
 RUN useradd --system --create-home --uid 10001 entrasim \
-    && mkdir -p /certs /seed \
-    && chown entrasim:entrasim /certs /seed
+    && mkdir -p /certs /seed /logs \
+    && chown entrasim:entrasim /certs /seed /logs
 
 COPY --from=builder /build/target/release/entra-sim /usr/local/bin/entra-sim
 COPY --from=studio /studio/dist /usr/share/entra-sim/studio
@@ -66,7 +67,8 @@ ENV ENTRA_SIM_BIND=0.0.0.0 \
     ENTRA_SIM_TLS_SAN=localhost,127.0.0.1,entra-sim \
     ENTRA_SIM_CA_OUT=/certs/ca.pem \
     ENTRA_SIM_PUBLIC_HOST=localhost:8443 \
-    ENTRA_SIM_STUDIO_DIR=/usr/share/entra-sim/studio
+    ENTRA_SIM_STUDIO_DIR=/usr/share/entra-sim/studio \
+    ENTRA_SIM_LOG_DIR=/logs
 
 EXPOSE 8080 8443
 

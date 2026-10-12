@@ -8,6 +8,8 @@ cd "$(dirname "$0")"
 
 IMAGE=entra-sim:local
 CONTAINER_NAME=entra-sim
+# The log of requests and events lives here, so it survives the container being replaced.
+LOG_VOLUME=entra-sim-logs
 
 sim_healthy() {
   curl --silent --fail --output /dev/null http://127.0.0.1:8080/__sim__/health
@@ -26,6 +28,7 @@ docker rm --force "$CONTAINER_NAME" >/dev/null 2>&1 || true
 # reads holds every secret, so it stays off the network.
 docker run --detach --rm --name "$CONTAINER_NAME" \
   -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 \
+  -v "$LOG_VOLUME":/logs \
   "$IMAGE" >/dev/null
 
 # Startup generates an RSA key, which takes a few seconds.
@@ -42,3 +45,5 @@ fi
 echo
 echo "Open http://localhost:8080/"
 echo "Stop it with: docker stop $CONTAINER_NAME"
+echo "Read its log with: docker run --rm -v $LOG_VOLUME:/logs debian:trixie-slim cat /logs/entra-sim.jsonl"
+echo "Empty its log with: docker volume rm $LOG_VOLUME (while it is stopped)"
