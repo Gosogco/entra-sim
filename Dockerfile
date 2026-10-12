@@ -46,9 +46,12 @@ RUN apt-get update \
 
 # An unprivileged user, with /certs, /seed and /logs owned by it so a mounted volume can be
 # written. A named volume mounted at /logs takes that ownership, so the log survives the container.
+# /logs is also writable by anyone, as /tmp is, because the simulator opens its log there at
+# startup and must still start when run with `--user` as some other uid.
 RUN useradd --system --create-home --uid 10001 entrasim \
     && mkdir -p /certs /seed /logs \
-    && chown entrasim:entrasim /certs /seed /logs
+    && chown entrasim:entrasim /certs /seed /logs \
+    && chmod 1777 /logs
 
 COPY --from=builder /build/target/release/entra-sim /usr/local/bin/entra-sim
 COPY --from=studio /studio/dist /usr/share/entra-sim/studio
