@@ -1,6 +1,11 @@
 # Everything the image does not need. Keeping target/ out matters most: it is large and its
 # host-built artefacts would be invalidated by the builder anyway.
 target/
+examples/
+studio/node_modules/
+studio/dist/
+studio/test-results/
+studio/playwright-report/
 .git/
 .github/
 contract/

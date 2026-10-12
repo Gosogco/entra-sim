@@ -20,6 +20,19 @@ RUN touch src/main.rs src/lib.rs \
     && cargo build --release --locked \
     && strip target/release/entra-sim
 
+# The studio, the browser view of the simulator's directory. Node 22, the version CI builds it
+# with.
+FROM node:22-trixie-slim AS studio
+
+WORKDIR /studio
+
+# Installed from the manifests alone, so editing the studio's source does not reinstall them.
+COPY studio/package.json studio/package-lock.json ./
+RUN npm ci
+
+COPY studio ./
+RUN npm run build
+
 # Slim rather than scratch: rustls needs no OpenSSL, so a static image would work, but keeping a
 # shell means a failing container can still be inspected, which matters for something whose job
 # is to be debugged against.
@@ -37,20 +50,23 @@ RUN useradd --system --create-home --uid 10001 entrasim \
     && chown entrasim:entrasim /certs /seed
 
 COPY --from=builder /build/target/release/entra-sim /usr/local/bin/entra-sim
+COPY --from=studio /studio/dist /usr/share/entra-sim/studio
 
 USER entrasim
 WORKDIR /home/entrasim
 
 # Defaults chosen so `docker run -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 entra-sim` is
-# immediately usable: the certificate covers the container name and localhost, and the CA lands
-# where a volume can pick it up. The bind is 0.0.0.0 because port forwarding cannot reach a
-# container listening on its own loopback; the `-p` address decides who on the host can connect.
+# immediately usable: the certificate covers the container name and localhost, the CA lands
+# where a volume can pick it up, and the studio is served at http://localhost:8080/. The bind is
+# 0.0.0.0 because port forwarding cannot reach a container listening on its own loopback; the
+# `-p` address decides who on the host can connect.
 ENV ENTRA_SIM_BIND=0.0.0.0 \
     ENTRA_SIM_HTTP_PORT=8080 \
     ENTRA_SIM_HTTPS_PORT=8443 \
     ENTRA_SIM_TLS_SAN=localhost,127.0.0.1,entra-sim \
     ENTRA_SIM_CA_OUT=/certs/ca.pem \
-    ENTRA_SIM_PUBLIC_HOST=localhost:8443
+    ENTRA_SIM_PUBLIC_HOST=localhost:8443 \
+    ENTRA_SIM_STUDIO_DIR=/usr/share/entra-sim/studio
 
 EXPOSE 8080 8443
 

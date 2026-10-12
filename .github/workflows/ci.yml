@@ -118,6 +118,7 @@ jobs:
           done
 
           curl --fail --silent http://127.0.0.1:8080/__sim__/health
+          curl --fail --silent http://127.0.0.1:8080/ | grep -q '<title>entra-sim studio</title>'
           curl --fail --silent --cacert certs/ca.pem \
             https://localhost:8443/metadata/endpoints?api-version=2022-09-01 > /dev/null
 
