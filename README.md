@@ -34,8 +34,10 @@ From a checkout, `./run.sh` builds the image, starts it, and waits until it answ
 ```
 
 Then open http://localhost:8080/ for the studio, a read-only view of everything the simulator
-holds: users, groups, app registrations, enterprise apps, permissions, directory roles and the
-tokens it has issued. Stop it with `docker stop entra-sim`.
+holds: users, groups, app registrations, enterprise apps, permissions, directory roles, the
+tokens it has issued, and a log of every request it answered. Stop it with `docker stop entra-sim`.
+The log is kept on the Docker volume `entra-sim-logs`, so it survives a stop and the next
+`./run.sh`; `docker volume rm entra-sim-logs` empties it.
 
 To run the published image instead:
 
@@ -161,10 +163,17 @@ path:
 | `GET /__sim__/snapshot` | dump everything, including secrets |
 | `POST /__sim__/snapshot` | replace everything |
 | `GET /__sim__/tokens` | the tokens issued, and the refresh tokens and codes still redeemable, with their expiry |
+| `GET /__sim__/logs` | the log of requests and events, newest first, a page at a time (`before`, `after`, `limit`) |
 
 The token log holds metadata, not tokens, and shows only a prefix of each refresh token and code.
 It keeps the last 1000 issued and empties on reset. The studio at `/` shows all of this in a
 browser.
+
+The request log is different. Given `--log-dir` (`ENTRA_SIM_LOG_DIR`, which the image sets to
+`/logs`), the simulator appends to `entra-sim.jsonl` there: every request with its headers and
+both bodies, secrets and tokens included, and every event it logs, each tied to the request it
+happened during. Nothing trims the file and a reset leaves it alone. The studio's own reads of
+`/__sim__/*` and of its files are left out, so polling does not bury everything else.
 
 `--seed <file>` loads a snapshot at startup and on every reset, so a suite can reset between
 cases and land back on its fixtures.

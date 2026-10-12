@@ -97,9 +97,14 @@ rather than on all interfaces. Do not expose it on a shared network.
 | `GET /__sim__/health` | Version and tenant ID |
 | `GET /__sim__/snapshot` | Everything in the directory |
 | `GET /__sim__/tokens` | Issued tokens, refresh tokens, pending codes (0.4.0+; a `404` means an older simulator) |
+| `GET /__sim__/logs` | The Log tab: requests with their bodies, and events (a `404` means an older simulator) |
 
-The three are fetched together on each poll. If the simulator stops answering, a banner says how
-to start it and the last data received stays on screen.
+The first three are fetched together on each poll. If the simulator stops answering, a banner says
+how to start it and the last data received stays on screen.
+
+The Log tab reads only the entries newer than the last one it holds, each time the rest refreshes,
+so Pause and Refresh apply to it too. The log has no size limit, so older entries load a page at a
+time with **Load older**, and the filter searches only the entries loaded.
 
 Federated identity credentials are not part of the snapshot in simulator 0.3.x, so the App
 registrations tab says so instead of claiming there are none.

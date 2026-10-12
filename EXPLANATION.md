@@ -304,6 +304,11 @@ src/
   state.rs      The state that all handlers share.
   control.rs    The /__sim__ test control endpoints.
 
+  log/          The log of requests and events, in a JSON Lines file.
+    mod.rs      Append to the file. Read it back a page at a time.
+    requests.rs Record each request with its headers and bodies.
+    events.rs   Record each tracing event with the request it belongs to.
+
   store/        The directory data, held in memory.
     model.rs    The entity types: User, Group, Application, and others.
     mod.rs      The Directory container and its lookups.
@@ -581,11 +586,11 @@ type that is hardest to see in unit tests.
 
 ### The tests
 
-There are 177 tests.
+There are 215 tests.
 
 | File | Subject |
 |---|---|
-| Unit tests in `src/` | The `$filter` parser, PKCE, the permission table, the session store |
+| Unit tests in `src/` | The `$filter` parser, PKCE, the permission table, the session store, the log file and its event layer |
 | `tests/metadata.rs` | The Terraform metadata contract |
 | `tests/oidc.rs` | Discovery and JWKS |
 | `tests/token.rs` | Client credentials |
@@ -596,6 +601,8 @@ There are 177 tests.
 | `tests/enforcement.rs` | Permission refusals |
 | `tests/interactive.rs` | The browser flow, PKCE, refresh |
 | `tests/control.rs` | Seed, snapshot, reset |
+| `tests/log.rs` | The request log and what it leaves out |
+| `tests/log_events.rs` | Events tied to the request that raised them |
 
 ---
 
@@ -886,7 +893,7 @@ jobs:
 
 ### Control the state
 
-Five endpoints inspect and manage the state. They are under `/__sim__`. No
+Six endpoints inspect and manage the state. They are under `/__sim__`. No
 Graph path can conflict with this prefix.
 
 | Request | Result |
@@ -896,6 +903,7 @@ Graph path can conflict with this prefix.
 | `GET /__sim__/snapshot` | Write out everything, with secrets |
 | `POST /__sim__/snapshot` | Replace everything |
 | `GET /__sim__/tokens` | Tokens issued, open refresh tokens and codes |
+| `GET /__sim__/logs` | The log of requests and events |
 
 `/__sim__/tokens` lists the last 1000 tokens issued, newest first, with
 their client, subject, scopes or roles and expiry. Expired tokens stay in
@@ -903,6 +911,19 @@ the list. The list holds no token values. Refresh tokens and codes show
 only their first six characters, because they can still be redeemed. A
 reset empties the list. The studio, served at `/`, shows the snapshot
 and this list in a browser.
+
+`/__sim__/logs` reads the log file in `ENTRA_SIM_LOG_DIR`. The file has one
+JSON object per line. It holds every request with its headers and both
+bodies, and every event the simulator logs. Each event names the request it
+happened in. The bodies are not changed, so secrets and tokens are in the
+file. Nothing trims the file, and a reset does not touch it. The studio's
+own reads of `/__sim__/*` and of its files are not logged.
+
+The endpoint returns the newest 200 entries. `limit` changes the count.
+`before=N` returns entries older than entry N. `after=N` returns the oldest
+entries newer than N, so a reader that polls with it misses nothing. Without
+`ENTRA_SIM_LOG_DIR` there is no log, and the endpoint says
+`"enabled": false`.
 
 These endpoints need no token. A person who can reach the simulator can
 already make a token for any identity in it.
@@ -964,7 +985,8 @@ All settings have a flag and an environment variable.
 | `ENTRA_SIM_BOOTSTRAP_CLIENT_SECRET` | `entra-sim-bootstrap-secret` | Its secret |
 | `ENTRA_SIM_BOOTSTRAP_APP_ROLES` | 7 roles | Its app roles |
 | `ENTRA_SIM_TOKEN_TTL` | `3600` | The token lifetime, in seconds |
-| `ENTRA_SIM_LOG` | `info` | The log filter |
+| `ENTRA_SIM_LOG` | `info` | The filter for the log on stdout. The log file always records the simulator's debug events |
+| `ENTRA_SIM_LOG_DIR` | none | Keep the log file `entra-sim.jsonl` here. The container image sets `/logs` |
 
 **Set `ENTRA_SIM_PUBLIC_HOST` correctly.** The simulator puts this value in
 the metadata document, the discovery document and every token `iss` and
