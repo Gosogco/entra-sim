@@ -32,72 +32,53 @@ resource service principal's own `appRoles` and `oauth2PermissionScopes`. Micros
 principal is created when the simulator starts, so Graph permissions always resolve. A GUID that
 does not resolve is shown as-is, in amber, which usually means a dangling reference.
 
-## Quick start
-
-```sh
-./run.sh           # against whatever the simulator holds
-./run.sh --seed    # first create the React example's app and user (resets the directory)
-```
-
-It starts the simulator in Docker if it isn't running, or reuses the one that is, so it can run
-alongside the React example's `run.sh`. Then it starts the studio on http://localhost:5174/.
-
 ## Run it
 
-**1. Start the simulator**, on the loopback interface only (see the warning below):
+From the repository root:
 
 ```sh
-cd ../examples/react-spa      # so step 2's setup script finds the CA in certs/
+./run.sh
+```
+
+It builds the simulator's image, which includes the studio, starts it, and waits until it
+answers. Open http://localhost:8080/. The studio re-reads the simulator every 5 seconds;
+**Pause** stops that, for example while you study a row that is about to change.
+
+To have something to look at, run the React example's setup script against it. It creates a
+user, an app registration and its service principal, and resets the directory first, so do not
+run it against a simulator holding objects you want to keep:
+
+```sh
+cd examples/react-spa
 mkdir -p certs
-docker run --rm --user "$(id -u):$(id -g)" \
-  -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 -v "$PWD/certs:/certs" \
-  -e ENTRA_SIM_TENANT_DOMAIN=example.test \
-  ghcr.io/gosogco/entra-sim:0.4.0
-```
-
-**2. Optionally put something in it.** The React example's setup script creates a user, an app
-registration and its service principal:
-
-```sh
-cd ../examples/react-spa
+docker cp entra-sim:/certs/ca.pem certs/ca.pem
 CA=certs/ca.pem scripts/setup.sh > .env
-cd ../../studio
 ```
 
-The script resets the directory first, so do not run it against a simulator holding objects you
-want to keep.
+## Developing it
 
-**3. Run the studio:**
+`npm run dev` serves the studio on http://localhost:5174/ with live reload, reading from a
+simulator at `VITE_SIM_URL`, by default `http://localhost:8080`. That is the simulator's plain
+HTTP listener, which saves the browser from having to trust the simulator's self-generated TLS
+certificate just to read from it. Start the simulator with `./run.sh` first.
 
 ```sh
 npm install
 npm run dev
-```
-
-Open `http://localhost:5174/`. It re-reads the simulator every 5 seconds; **Pause** stops that,
-for example while you study a row that is about to change.
-
-### Pointing it elsewhere
-
-The studio reads from `VITE_SIM_URL`, by default `http://localhost:8080`. That is the
-simulator's plain HTTP listener, which saves the browser from having to trust the simulator's
-self-generated TLS certificate just to read from it.
-
-```sh
-VITE_SIM_URL=http://localhost:9080 npm run dev
+VITE_SIM_URL=http://localhost:9080 npm run dev    # a simulator elsewhere
 ```
 
 Or put the line in `.env.local`, which git ignores. Vite reads the variable when the dev server
 starts, so restart it after changing it.
+
+Built, the studio reads from whichever origin served it, so the same files work on the
+simulator's HTTP and HTTPS listeners.
 
 ## Tokens and federated credentials need simulator 0.4.0 or later
 
 The token list comes from `/__sim__/tokens`, and federated credentials from the snapshot, both
 added in 0.4.0. Against an older simulator the studio says so where they would appear, and the
 rest works normally.
-
-The command above pins `0.4.0`. If you use `:latest` instead, run `docker pull` first: Docker
-otherwise keeps using whatever `latest` it downloaded before, which may be older.
 
 Refresh tokens and authorization codes are listed by a short prefix only. The simulator never
 returns a whole one, since a value copied from this page would otherwise be a working credential.
@@ -106,8 +87,8 @@ returns a whole one, since a value copied from this page would otherwise be a wo
 
 `/__sim__/snapshot`, which the studio reads, returns the **whole directory including every client
 secret and user password**, with no authentication. That is fine for a simulator holding fake
-credentials on your own machine, and the reason the `docker run` above publishes its ports on
-`127.0.0.1` rather than on all interfaces. Do not expose it on a shared network.
+credentials on your own machine, and the reason `run.sh` publishes its ports on `127.0.0.1`
+rather than on all interfaces. Do not expose it on a shared network.
 
 ## Where the data comes from
 
@@ -132,9 +113,9 @@ npx playwright install chromium
 npm run e2e
 ```
 
-It expects the simulator at `VITE_SIM_URL`, seeded by `../examples/react-spa/scripts/setup.sh` beforehand.
-The test does not run the script itself, because a test of a read-only viewer should not be what
-changes the directory. It checks that:
+It expects the simulator at `VITE_SIM_URL`, seeded by `../examples/react-spa/scripts/setup.sh`
+beforehand. The test does not run the script itself, because a test of a read-only viewer should
+not be what changes the directory. It checks that:
 
 1. The Users tab lists `alice@example.test`, or `E2E_USER` if you seeded a different user.
 2. The App registrations tab lists the simulator's bootstrap client, with its secret masked until

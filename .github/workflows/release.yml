@@ -139,6 +139,8 @@ jobs:
             printf '```\n\n'
             printf 'Create `certs` first and pass `--user`, or the container cannot write its\n'
             printf 'CA certificate there. The CA is new on every restart.\n\n'
+            printf 'Open http://localhost:8080/ for the studio, a read-only view of the\n'
+            printf "simulator's directory and the tokens it has issued.\n\n"
             printf 'For Terraform, set `metadata_host` (or `ARM_METADATA_HOSTNAME`) to the\n'
             printf "simulator's host and port, and \`SSL_CERT_FILE\` to the CA it writes to\n"
             printf '`/certs/ca.pem`.\n'

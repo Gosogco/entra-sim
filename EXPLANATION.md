@@ -901,7 +901,7 @@ Graph path can conflict with this prefix.
 their client, subject, scopes or roles and expiry. Expired tokens stay in
 the list. The list holds no token values. Refresh tokens and codes show
 only their first six characters, because they can still be redeemed. A
-reset empties the list. `examples/entra-sim-studio/` shows the snapshot
+reset empties the list. The studio, served at `/`, shows the snapshot
 and this list in a browser.
 
 These endpoints need no token. A person who can reach the simulator can

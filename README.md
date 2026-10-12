@@ -27,6 +27,18 @@ configuration only.
 
 ## Running it
 
+From a checkout, `./run.sh` builds the image, starts it, and waits until it answers:
+
+```sh
+./run.sh
+```
+
+Then open http://localhost:8080/ for the studio, a read-only view of everything the simulator
+holds: users, groups, app registrations, enterprise apps, permissions, directory roles and the
+tokens it has issued. Stop it with `docker stop entra-sim`.
+
+To run the published image instead:
+
 ```sh
 mkdir -p certs
 docker run --rm --user "$(id -u):$(id -g)" \
@@ -36,7 +48,9 @@ docker run --rm --user "$(id -u):$(id -g)" \
 ```
 
 It serves HTTPS on 8443 and plain HTTP on 8080, generates a CA and server certificate at
-startup, and writes the CA to `/certs/ca.pem` so clients can be told to trust it.
+startup, and writes the CA to `/certs/ca.pem` so clients can be told to trust it. Both listeners
+serve the studio at `/`. The image sets `ENTRA_SIM_STUDIO_DIR` to the built studio; the binary
+run outside a container serves nothing at `/` unless given `--studio-dir`.
 
 `127.0.0.1:` keeps the ports off the network. The simulator has no real authentication: the
 bootstrap secret below is public, and `/__sim__/snapshot` returns every secret it holds. The
@@ -149,8 +163,8 @@ path:
 | `GET /__sim__/tokens` | the tokens issued, and the refresh tokens and codes still redeemable, with their expiry |
 
 The token log holds metadata, not tokens, and shows only a prefix of each refresh token and code.
-It keeps the last 1000 issued and empties on reset. `examples/entra-sim-studio/` shows all of
-this in a browser.
+It keeps the last 1000 issued and empties on reset. The studio at `/` shows all of this in a
+browser.
 
 `--seed <file>` loads a snapshot at startup and on every reset, so a suite can reset between
 cases and land back on its fixtures.
