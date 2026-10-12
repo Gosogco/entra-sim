@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use time::serde::rfc3339;
 use time::{Duration, OffsetDateTime};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::auth::middleware::Caller;
@@ -134,6 +135,12 @@ async fn create(
         None => vec![caller.claims.oid.clone()],
     };
     let body = serialise(&application)?;
+    info!(
+        application_id = %application.id,
+        app_id = %application.app_id,
+        display_name = %application.display_name,
+        "created application"
+    );
     directory
         .applications
         .insert(application.id.clone(), application);
@@ -179,6 +186,7 @@ async fn update(
         principal.oauth2_permission_scopes = scopes;
     }
 
+    info!(application_id = %key, "updated application");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -192,6 +200,7 @@ async fn delete(
         .map(|application| application.id.clone())
         .ok_or_else(|| GraphError::resource_not_found(&id))?;
     directory.applications.remove(&key);
+    info!(application_id = %key, "deleted application");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -368,6 +377,7 @@ async fn add_password(
         .expect("key came from lookup")
         .password_credentials
         .push(credential);
+    info!(application_id = %key, key_id = %response.key_id, "added a client secret");
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -399,6 +409,7 @@ async fn remove_password(
     if credentials.len() == before {
         return Err(GraphError::resource_not_found(&body.key_id));
     }
+    info!(application_id = %key, key_id = %body.key_id, "removed a client secret");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -457,6 +468,7 @@ async fn add_key(
         .expect("key came from lookup")
         .key_credentials
         .push(credential.clone());
+    info!(application_id = %key, key_id = %credential.key_id, "added a key credential");
 
     Ok((StatusCode::OK, Json(credential)))
 }
@@ -482,6 +494,7 @@ async fn remove_key(
     if credentials.len() == before {
         return Err(GraphError::resource_not_found(&body.key_id));
     }
+    info!(application_id = %key, key_id = %body.key_id, "removed a key credential");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -545,6 +558,7 @@ async fn add_owner(
              properties: 'owners'.",
         ));
     }
+    info!(application_id = %key, owner_id = %referenced, "added an application owner");
     owners.push(referenced);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -569,6 +583,7 @@ async fn remove_owner(
     if owners.len() == before {
         return Err(GraphError::resource_not_found(&owner_id));
     }
+    info!(application_id = %key, owner_id = %owner_id, "removed an application owner");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -648,6 +663,12 @@ async fn create_federated(
         )));
     }
     credentials.push(credential.clone());
+    info!(
+        application_id = %key,
+        credential_id = %credential.id,
+        name = %credential.name,
+        "added a federated identity credential"
+    );
 
     Ok((StatusCode::CREATED, Json(credential)))
 }
@@ -693,6 +714,7 @@ async fn delete_federated(
     if credentials.len() == before {
         return Err(GraphError::resource_not_found(&credential_id));
     }
+    info!(application_id = %key, credential_id = %credential_id, "removed a federated identity credential");
     Ok(StatusCode::NO_CONTENT)
 }
 

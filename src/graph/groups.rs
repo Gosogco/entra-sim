@@ -8,6 +8,7 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use time::OffsetDateTime;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::auth::middleware::Caller;
@@ -205,6 +206,7 @@ async fn create(
     };
 
     let body = serialise(&group)?;
+    info!(group_id = %group.id, display_name = %group.display_name, "created group");
     directory.groups.insert(group.id.clone(), group);
     Ok((StatusCode::CREATED, Json(body)))
 }
@@ -275,6 +277,7 @@ async fn update(
             }
         }
     }
+    info!(group_id = %id, "updated group");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -292,6 +295,7 @@ async fn delete(
         group.members.retain(|member| member != &id);
         group.owners.retain(|owner| owner != &id);
     }
+    info!(group_id = %id, "deleted group");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -463,6 +467,7 @@ async fn add_reference(
             ),
         ));
     }
+    info!(group_id = %id, link = link.name(), object_id = %referenced, "added a reference to a group");
     list.push(referenced);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -501,6 +506,7 @@ async fn remove_reference(
     if list.len() == before {
         return Err(GraphError::resource_not_found(&referenced));
     }
+    info!(group_id = %id, link = link.name(), object_id = %referenced, "removed a reference from a group");
     Ok(StatusCode::NO_CONTENT)
 }
 

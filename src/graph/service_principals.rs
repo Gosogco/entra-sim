@@ -10,6 +10,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use tracing::info;
 use uuid::Uuid;
 
 use crate::auth::middleware::Caller;
@@ -120,6 +121,12 @@ async fn create(
     apply_all(&mut principal, fields)?;
 
     let body = serialise(&principal)?;
+    info!(
+        service_principal_id = %principal.id,
+        app_id = %principal.app_id,
+        display_name = %principal.display_name,
+        "created service principal"
+    );
     directory
         .service_principals
         .insert(principal.id.clone(), principal);
@@ -146,6 +153,7 @@ async fn update(
         .get_mut(&key)
         .expect("key came from lookup");
     apply_all(principal, patch)?;
+    info!(service_principal_id = %key, "updated service principal");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -165,6 +173,7 @@ async fn delete(
         group.members.retain(|member| member != &key);
         group.owners.retain(|owner| owner != &key);
     }
+    info!(service_principal_id = %key, "deleted service principal");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -284,6 +293,7 @@ async fn add_owner(
              properties: 'owners'.",
         ));
     }
+    info!(service_principal_id = %key, owner_id = %referenced, "added a service principal owner");
     owners.push(referenced);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -308,6 +318,7 @@ async fn remove_owner(
     if owners.len() == before {
         return Err(GraphError::resource_not_found(&owner_id));
     }
+    info!(service_principal_id = %key, owner_id = %owner_id, "removed a service principal owner");
     Ok(StatusCode::NO_CONTENT)
 }
 

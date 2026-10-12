@@ -7,6 +7,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{Map, Value};
 use time::OffsetDateTime;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::auth::middleware::Caller;
@@ -149,6 +150,7 @@ async fn create(
     };
 
     let body = serialise(&user)?;
+    info!(user_id = %user.id, upn = %user.user_principal_name, "created user");
     directory.users.insert(user.id.clone(), user);
     Ok((StatusCode::CREATED, Json(body)))
 }
@@ -170,6 +172,7 @@ async fn update(
     for (property, value) in patch {
         apply(user, property, value)?;
     }
+    info!(user_id = %key, "updated user");
 
     // Graph answers a successful PATCH with no body.
     Ok(StatusCode::NO_CONTENT)
@@ -183,6 +186,7 @@ async fn delete(
     let mut directory = state.store.write().await;
     let key = lookup_key(&directory, &id).ok_or_else(|| GraphError::resource_not_found(&id))?;
     directory.users.remove(&key);
+    info!(user_id = %key, "deleted user");
     Ok(StatusCode::NO_CONTENT)
 }
 

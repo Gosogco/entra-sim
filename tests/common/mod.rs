@@ -26,6 +26,7 @@ pub struct Sim {
     pub bootstrap_client_id: String,
     pub bootstrap_client_secret: String,
     pub client: reqwest::Client,
+    pub log: Option<Log>,
     /// Held so the log directory is removed when the test is done with the simulator.
     _log_dir: Option<TempDir>,
 }
@@ -89,7 +90,7 @@ impl Sim {
         let bootstrap_client_id = config.bootstrap_client_id.clone();
         let bootstrap_client_secret = config.bootstrap_client_secret.clone();
         let log = config.log_dir.as_deref().map(Log::open).transpose()?;
-        let state = AppState::with_seed(config, SIGNING_KEY.clone(), log).await?;
+        let state = AppState::with_seed(config, SIGNING_KEY.clone(), log.clone()).await?;
         let app = entra_sim::router(state);
 
         tokio::spawn(async move {
@@ -103,6 +104,7 @@ impl Sim {
             bootstrap_client_id,
             bootstrap_client_secret,
             client: reqwest::Client::new(),
+            log,
             _log_dir: None,
         })
     }

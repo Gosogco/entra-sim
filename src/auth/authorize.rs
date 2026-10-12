@@ -13,6 +13,7 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use serde::Deserialize;
 use time::OffsetDateTime;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::auth::sessions::{AuthorizationCode, code_expiry};
@@ -330,6 +331,13 @@ async fn issue_code(
             },
         );
     }
+    info!(
+        client_id = %validated.client_id,
+        user_id = %user_id,
+        redirect_uri = %validated.redirect_uri,
+        scope = %scope.join(" "),
+        "issued an authorization code"
+    );
 
     let _ = tenant;
     let mut parameters = format!("code={}", urlencode(&code));
@@ -431,6 +439,7 @@ async fn consent(state: &AppState, validated: &Validated, user_id: &str) -> Vec<
         Some(grant) => {
             if let Some(stored) = directory.oauth2_permission_grants.get_mut(&grant.id) {
                 stored.scope = scopes.join(" ");
+                info!(grant_id = %grant.id, scope = %stored.scope, "updated OAuth2 permission grant on consent");
             }
         }
         None => {
@@ -443,6 +452,13 @@ async fn consent(state: &AppState, validated: &Validated, user_id: &str) -> Vec<
                 resource_id,
                 scope: scopes.join(" "),
             };
+            info!(
+                grant_id = %grant.id,
+                client_id = %grant.client_id,
+                user_id = %user_id,
+                scope = %grant.scope,
+                "created OAuth2 permission grant on consent"
+            );
             directory
                 .oauth2_permission_grants
                 .insert(grant.id.clone(), grant);
@@ -459,6 +475,7 @@ struct LogoutRequest {
 
 /// The simulator keeps no browser session, so signing out is only the redirect.
 async fn logout(Query(request): Query<LogoutRequest>) -> Response {
+    info!("signed out");
     match request.post_logout_redirect_uri {
         Some(uri) => found(&uri),
         None => (

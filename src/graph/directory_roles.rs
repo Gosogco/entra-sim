@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::Value;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::auth::middleware::Caller;
@@ -182,6 +183,7 @@ async fn activate(
 
     let value = serde_json::to_value(&role)
         .map_err(|error| GraphError::internal(format!("serialising a directory role: {error}")))?;
+    info!(role_id = %role.id, display_name = %role.display_name, "activated directory role");
     directory.directory_roles.insert(role.id.clone(), role);
     Ok((StatusCode::CREATED, Json(value)))
 }
@@ -246,6 +248,7 @@ async fn add_member(
              properties: 'members'.",
         ));
     }
+    info!(role_id = %key, member_id = %referenced, "added a directory role member");
     members.push(referenced);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -270,6 +273,7 @@ async fn remove_member(
     if members.len() == before {
         return Err(GraphError::resource_not_found(&member_id));
     }
+    info!(role_id = %key, member_id = %member_id, "removed a directory role member");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -424,6 +428,7 @@ async fn create_role_assignment(
                 members: Vec::new(),
             };
             let key = role.id.clone();
+            info!(role_id = %key, display_name = %role.display_name, "activated directory role");
             directory.directory_roles.insert(key.clone(), role);
             key
         }
@@ -444,6 +449,12 @@ async fn create_role_assignment(
         ));
     }
     role.members.push(body.principal_id.clone());
+    info!(
+        role_id = %key,
+        role_definition_id = %template.id,
+        principal_id = %body.principal_id,
+        "created directory role assignment"
+    );
 
     Ok((
         StatusCode::CREATED,
@@ -479,6 +490,7 @@ async fn delete_role_assignment(
         .expect("role came from the search above")
         .members
         .retain(|existing| existing != &member);
+    info!(role_id = %role_id, principal_id = %member, "deleted directory role assignment");
     Ok(StatusCode::NO_CONTENT)
 }
 

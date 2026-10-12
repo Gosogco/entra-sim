@@ -18,6 +18,7 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::Value;
 use time::OffsetDateTime;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::auth::middleware::Caller;
@@ -241,6 +242,13 @@ async fn create_side(
 
     let body = serde_json::to_value(&assignment)
         .map_err(|error| GraphError::internal(format!("serialising an assignment: {error}")))?;
+    info!(
+        assignment_id = %assignment.id,
+        app_role_id = %assignment.app_role_id,
+        principal_id = %assignment.principal_id,
+        resource_id = %assignment.resource_id,
+        "created app role assignment"
+    );
     directory
         .app_role_assignments
         .insert(assignment.id.clone(), assignment);
@@ -280,6 +288,7 @@ async fn delete_assignment(
     {
         return Err(GraphError::resource_not_found(&assignment_id));
     }
+    info!(assignment_id = %assignment_id, "deleted app role assignment");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -430,6 +439,13 @@ async fn create_grant(
 
     let value = serde_json::to_value(&grant)
         .map_err(|error| GraphError::internal(format!("serialising a grant: {error}")))?;
+    info!(
+        grant_id = %grant.id,
+        client_id = %grant.client_id,
+        resource_id = %grant.resource_id,
+        scope = %grant.scope,
+        "created OAuth2 permission grant"
+    );
     directory
         .oauth2_permission_grants
         .insert(grant.id.clone(), grant);
@@ -455,6 +471,7 @@ async fn update_grant(
             .ok_or_else(|| GraphError::invalid_property("scope"))?
             .to_string();
     }
+    info!(grant_id = %id, scope = %grant.scope, "updated OAuth2 permission grant");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -467,6 +484,7 @@ async fn delete_grant(
     if directory.oauth2_permission_grants.remove(&id).is_none() {
         return Err(GraphError::resource_not_found(&id));
     }
+    info!(grant_id = %id, "deleted OAuth2 permission grant");
     Ok(StatusCode::NO_CONTENT)
 }
 

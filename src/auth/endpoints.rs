@@ -8,7 +8,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::auth::oauth_error::{self, OAuthFailure};
 use crate::auth::sessions::{Grant, IssuedToken, SubjectKind, TokenKind};
@@ -148,6 +148,12 @@ async fn client_credentials(
     };
     // Released before taking the session lock, so the two locks are never held together.
     drop(directory);
+    info!(
+        client_id = %client_id,
+        subject_id = %issued.subject_id,
+        audience = %issued.audience,
+        "issued an app token"
+    );
     state.sessions.lock().await.record_issued(issued);
 
     Ok(Json(TokenResponse {
@@ -433,6 +439,15 @@ async fn issue_user_tokens(
     } else {
         None
     };
+    info!(
+        grant = ?grant,
+        client_id = %client_id,
+        user_id = %user_id,
+        upn = %user_principal_name,
+        scope = %resource_scopes.join(" "),
+        refresh_token = refresh.is_some(),
+        "issued user tokens"
+    );
 
     Ok(Json(TokenResponse {
         token_type: "Bearer",
