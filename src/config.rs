@@ -143,6 +143,11 @@ pub struct Config {
     /// Lifetime of issued access tokens, in seconds.
     #[arg(long, env = "ENTRA_SIM_TOKEN_TTL", default_value_t = 3600)]
     pub token_ttl_seconds: u64,
+
+    /// Serve the files in this directory at `/`. The container image points it at the built
+    /// studio. Unset, nothing is served there.
+    #[arg(long, env = "ENTRA_SIM_STUDIO_DIR")]
+    pub studio_dir: Option<PathBuf>,
 }
 
 impl Config {

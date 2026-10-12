@@ -15,19 +15,28 @@ pub mod store;
 pub mod tls;
 
 use axum::Router;
+use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 use crate::state::AppState;
 
 /// Build the complete application router.
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let mut router = Router::new()
         .merge(control::router())
         .merge(metadata::router())
         .merge(auth::oidc::router())
         .merge(auth::endpoints::router())
         .merge(auth::authorize::router())
-        .merge(graph::router())
+        .merge(graph::router());
+
+    // A fallback, so it only answers paths no route claims. The studio keeps its tab in the URL
+    // fragment, so there are no client-side paths that would need `index.html` in their place.
+    if let Some(dir) = &state.config.studio_dir {
+        router = router.fallback_service(ServeDir::new(dir));
+    }
+
+    router
         // Outside the routes, so a preflight request is answered without matching one.
         .layer(cors::layer(&state.config))
         .layer(TraceLayer::new_for_http())
