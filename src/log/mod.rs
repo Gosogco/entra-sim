@@ -14,6 +14,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::{Context, Result};
 use serde_json::Value;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
+
+pub mod requests;
 
 pub const FILE_NAME: &str = "entra-sim.jsonl";
 
@@ -128,6 +132,13 @@ impl Log {
         // the log stays usable.
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// The time an entry is stamped with.
+fn now() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
