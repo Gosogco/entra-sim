@@ -6,6 +6,7 @@ use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
 use entra_sim::auth::keys::SigningKey;
 use entra_sim::config::Config;
+use entra_sim::log::Log;
 use entra_sim::state::AppState;
 use entra_sim::{router, tls};
 use tracing::info;
@@ -39,7 +40,8 @@ async fn run(config: Config) -> Result<()> {
     let signing_key = Arc::new(load_signing_key(&config).await?);
     info!(kid = %signing_key.kid, "token signing key ready");
 
-    let state = AppState::with_seed(config, signing_key).await?;
+    let log = config.log_dir.as_deref().map(Log::open).transpose()?;
+    let state = AppState::with_seed(config, signing_key, log).await?;
     let app = router(state);
 
     let http = {

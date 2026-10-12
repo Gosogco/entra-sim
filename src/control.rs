@@ -7,12 +7,14 @@
 //! identity in it, so a token here would be a formality; and a test harness needs to reset
 //! state before it has obtained one.
 
-use axum::extract::State;
+use anyhow::Context;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use time::OffsetDateTime;
 use time::serde::rfc3339;
 use tracing::info;
@@ -76,6 +78,26 @@ struct PendingCode {
     expires_at: OffsetDateTime,
 }
 
+/// Which entries of the log to return. See [`crate::log::Log::page`].
+#[derive(Deserialize)]
+struct LogQuery {
+    before: Option<u64>,
+    after: Option<u64>,
+    limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct LogPage {
+    /// False when the simulator was started without a log directory.
+    enabled: bool,
+    total: u64,
+    /// Newest first.
+    entries: Vec<Value>,
+}
+
+/// Entries returned when the request does not say how many.
+const LOG_PAGE_SIZE: usize = 200;
+
 /// How much of a refresh token or code value is shown: enough to tell two apart, too little to
 /// redeem.
 const PREFIX_LENGTH: usize = 6;
@@ -86,6 +108,7 @@ pub fn router() -> Router<AppState> {
         .route("/__sim__/reset", post(reset))
         .route("/__sim__/snapshot", get(dump).post(load))
         .route("/__sim__/tokens", get(tokens))
+        .route("/__sim__/logs", get(logs))
 }
 
 async fn health(State(state): State<AppState>) -> Json<Health> {
@@ -165,6 +188,32 @@ async fn tokens(State(state): State<AppState>) -> Json<Tokens> {
         refresh_tokens,
         pending_codes,
     })
+}
+
+/// Page through the log of requests and events.
+async fn logs(
+    State(state): State<AppState>,
+    Query(query): Query<LogQuery>,
+) -> Result<Json<LogPage>, Failure> {
+    let Some(log) = &state.log else {
+        return Ok(Json(LogPage {
+            enabled: false,
+            total: 0,
+            entries: Vec::new(),
+        }));
+    };
+    let page = log
+        .page(
+            query.before,
+            query.after,
+            query.limit.unwrap_or(LOG_PAGE_SIZE),
+        )
+        .context("reading the log")?;
+    Ok(Json(LogPage {
+        enabled: true,
+        total: page.total,
+        entries: page.entries,
+    }))
 }
 
 /// Replace the whole directory with the posted snapshot.

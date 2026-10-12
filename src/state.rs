@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use crate::auth::keys::SigningKey;
 use crate::auth::sessions::{SessionStore, new_store as new_session_store};
 use crate::config::Config;
+use crate::log::Log;
 use crate::store::snapshot::Snapshot;
 use crate::store::{Directory, Store, bootstrap, new_store};
 
@@ -18,11 +19,13 @@ pub struct AppState {
     pub store: Store,
     /// Authorization codes and refresh tokens awaiting redemption.
     pub sessions: SessionStore,
+    /// The record of requests and events, when the simulator was given somewhere to keep it.
+    pub log: Option<Log>,
 }
 
 impl AppState {
     /// Build state with a directory containing only the bootstrap objects.
-    pub fn new(config: Config, signing_key: Arc<SigningKey>) -> Self {
+    pub fn new(config: Config, signing_key: Arc<SigningKey>, log: Option<Log>) -> Self {
         let mut directory = Directory::default();
         bootstrap::install(&mut directory, &config);
         Self {
@@ -30,12 +33,17 @@ impl AppState {
             signing_key,
             store: new_store(directory),
             sessions: new_session_store(),
+            log,
         }
     }
 
     /// Build state with the configured seed applied, failing if the seed cannot be read.
-    pub async fn with_seed(config: Config, signing_key: Arc<SigningKey>) -> Result<Self> {
-        let state = Self::new(config, signing_key);
+    pub async fn with_seed(
+        config: Config,
+        signing_key: Arc<SigningKey>,
+        log: Option<Log>,
+    ) -> Result<Self> {
+        let state = Self::new(config, signing_key, log);
         let seeded = state.rebuild_initial_directory().await?;
         *state.store.write().await = seeded;
         Ok(state)

@@ -6,11 +6,13 @@
 #![allow(dead_code)]
 
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 
 use clap::Parser;
 use entra_sim::auth::keys::SigningKey;
 use entra_sim::config::Config;
+use entra_sim::log::Log;
 use entra_sim::state::AppState;
 
 /// Generating an RSA 2048 key costs real time, so every simulator in a test binary shares one.
@@ -24,6 +26,23 @@ pub struct Sim {
     pub bootstrap_client_id: String,
     pub bootstrap_client_secret: String,
     pub client: reqwest::Client,
+    /// Held so the log directory is removed when the test is done with the simulator.
+    _log_dir: Option<TempDir>,
+}
+
+/// A directory under the system temp directory, removed on drop.
+pub struct TempDir(pub PathBuf);
+
+impl TempDir {
+    pub fn new() -> Self {
+        Self(std::env::temp_dir().join(format!("entra-sim-test-{}", uuid::Uuid::new_v4())))
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 impl Sim {
@@ -37,6 +56,19 @@ impl Sim {
         Self::try_start_with(adjust)
             .await
             .expect("the simulator should start")
+    }
+
+    /// Start a simulator that keeps a log in a fresh temporary directory.
+    pub async fn start_with_log(adjust: impl FnOnce(&mut Config)) -> Self {
+        let dir = TempDir::new();
+        let path = dir.0.clone();
+        let mut sim = Self::start_with(|config| {
+            config.log_dir = Some(path);
+            adjust(config);
+        })
+        .await;
+        sim._log_dir = Some(dir);
+        sim
     }
 
     /// Start a simulator, returning the error instead of panicking.
@@ -56,7 +88,8 @@ impl Sim {
         let public_base_url = config.public_base_url();
         let bootstrap_client_id = config.bootstrap_client_id.clone();
         let bootstrap_client_secret = config.bootstrap_client_secret.clone();
-        let state = AppState::with_seed(config, SIGNING_KEY.clone()).await?;
+        let log = config.log_dir.as_deref().map(Log::open).transpose()?;
+        let state = AppState::with_seed(config, SIGNING_KEY.clone(), log).await?;
         let app = entra_sim::router(state);
 
         tokio::spawn(async move {
@@ -70,6 +103,7 @@ impl Sim {
             bootstrap_client_id,
             bootstrap_client_secret,
             client: reqwest::Client::new(),
+            _log_dir: None,
         })
     }
 
