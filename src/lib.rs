@@ -8,6 +8,7 @@ pub mod config;
 pub mod control;
 pub mod cors;
 pub mod graph;
+pub mod log;
 pub mod metadata;
 pub mod odata;
 pub mod state;

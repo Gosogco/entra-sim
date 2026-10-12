@@ -148,6 +148,12 @@ pub struct Config {
     /// studio. Unset, nothing is served there.
     #[arg(long, env = "ENTRA_SIM_STUDIO_DIR")]
     pub studio_dir: Option<PathBuf>,
+
+    /// Record every request and event in `entra-sim.jsonl` in this directory, which the studio
+    /// reads through `GET /__sim__/logs`. The file is appended to across restarts and never
+    /// trimmed. Unset, nothing is recorded.
+    #[arg(long, env = "ENTRA_SIM_LOG_DIR")]
+    pub log_dir: Option<PathBuf>,
 }
 
 impl Config {
