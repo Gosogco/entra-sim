@@ -7,7 +7,7 @@
 # A simulator that is already running in a container is reused rather than replaced, so both
 # examples can run side by side against the same directory.
 
-IMAGE="${ENTRA_SIM_IMAGE:-ghcr.io/gosogco/entra-sim:0.4.0}"
+IMAGE="${ENTRA_SIM_IMAGE:-ghcr.io/gosogco/entra-sim:latest}"
 CONTAINER_NAME=entra-sim-examples
 
 sim_healthy() {
@@ -33,7 +33,7 @@ else
   echo "Starting $IMAGE as container $CONTAINER_NAME."
   # Ports on 127.0.0.1 only: the simulator has no real authentication, so it stays off the
   # network. example.test, because the example's user is alice@example.test.
-  docker run --detach --rm --name "$CONTAINER_NAME" \
+  docker run --pull always --detach --rm --name "$CONTAINER_NAME" \
     -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 \
     -e ENTRA_SIM_TENANT_DOMAIN=example.test \
     "$IMAGE" >/dev/null
