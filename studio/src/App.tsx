@@ -7,6 +7,7 @@ import { TABS, tabFromHash, type Tab } from './tabs'
 import { ApplicationsView } from './views/Applications'
 import { DirectoryRolesView } from './views/DirectoryRoles'
 import { GroupsView } from './views/Groups'
+import { LogView } from './views/Log'
 import { OverviewView } from './views/Overview'
 import { PermissionsView } from './views/Permissions'
 import { ServicePrincipalsView } from './views/ServicePrincipals'
@@ -135,6 +136,7 @@ export function App() {
               {tab === 'permissions' && <PermissionsView />}
               {tab === 'roles' && <DirectoryRolesView />}
               {tab === 'tokens' && <TokensView tokens={state.tokens} version={state.health.version} />}
+              {tab === 'log' && <LogView fetchedAt={state.fetchedAt} version={state.health.version} />}
             </DirectoryContext.Provider>
           </ClockOffsetContext.Provider>
         )}

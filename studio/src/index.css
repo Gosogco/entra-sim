@@ -129,6 +129,7 @@ ul.plain li + li { margin-top: .15rem; }
 .ok { color: var(--ok); }
 .warn { color: var(--warn); }
 .bad { color: var(--bad); }
+.nowrap { white-space: nowrap; }
 .ref { border-bottom: 1px dotted var(--muted); cursor: help; }
 .unknown { color: var(--warn); }
 .kind {
@@ -155,6 +156,11 @@ ul.plain li + li { margin-top: .15rem; }
 .badge { font-size: .75rem; font-weight: 600; padding: .05rem .4rem; border-radius: .25rem; }
 .badge-access { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 .badge-id { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.badge-error { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.badge-warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.badge-info { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.badge-debug, .badge-trace { background: var(--soft); color: var(--muted); }
+pre.body { background: var(--bg); border: 1px solid var(--line); border-radius: .4rem; padding: .5rem .7rem; margin: .4rem 0 0; max-height: 24rem; overflow: auto; white-space: pre-wrap; word-break: break-all; }
 .masked {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .85rem;

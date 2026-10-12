@@ -65,3 +65,38 @@ test('the Tokens tab lists a token as soon as one is issued', async ({ page, req
   const row = page.getByTestId('issued-table').locator('tbody tr:not(:has(td.empty))')
   await expect(row.filter({ hasText: BOOTSTRAP_APP }).first()).toBeVisible({ timeout: 15_000 })
 })
+
+test('the Log tab shows a token request and the event it raised', async ({ page, request }) => {
+  const log = await request.get(`${SIM}/__sim__/logs?limit=1`)
+  if (log.status() === 404) {
+    await page.goto('/#log')
+    await expect(page.getByTestId('log-unsupported')).toBeVisible({ timeout: 15_000 })
+    return
+  }
+  // A simulator started without a log directory says so instead.
+  if (!(await log.json()).enabled) {
+    await page.goto('/#log')
+    await expect(page.getByTestId('log-off')).toBeVisible({ timeout: 15_000 })
+    return
+  }
+
+  const health = await (await request.get(`${SIM}/__sim__/health`)).json()
+  const metadata = await (await request.get(`${SIM}/metadata/endpoints`)).json()
+  const resource = String(metadata.microsoftGraphResourceId).replace(/\/$/, '')
+  const tokenPath = `/${health.tenant_id}/oauth2/v2.0/token`
+  const issued = await request.post(`${SIM}${tokenPath}`, {
+    form: {
+      grant_type: 'client_credentials',
+      client_id: '11111111-1111-1111-1111-111111111111',
+      client_secret: 'entra-sim-bootstrap-secret',
+      scope: `${resource}/.default`,
+    },
+  })
+  expect(issued.ok()).toBe(true)
+
+  await page.goto('/#log')
+  const row = page.getByTestId('log-table').locator('tbody tr', { hasText: `POST ${tokenPath}` }).first()
+  await expect(row).toBeVisible({ timeout: 15_000 })
+  await row.click()
+  await expect(page.getByTestId('log-table').locator('tr.details').first()).toContainText('issued an app token')
+})

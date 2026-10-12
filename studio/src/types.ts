@@ -209,3 +209,45 @@ export interface Tokens {
   refreshTokens: RefreshTokenRecord[]
   pendingCodes: PendingCode[]
 }
+
+/// One HTTP request the simulator answered. Bodies are as sent, secrets included; `null` when
+/// there was none.
+export interface RequestLogEntry {
+  seq: number
+  kind: 'request'
+  time: string
+  requestId: string
+  method: string
+  /// Path and query string.
+  uri: string
+  status: number
+  durationMs: number
+  requestHeaders: Record<string, string>
+  requestBody: string | null
+  responseHeaders: Record<string, string>
+  responseBody: string | null
+}
+
+/// Something the simulator logged. `requestId` names the request it happened during, or is
+/// `null` for startup and anything else outside a request.
+export interface EventLogEntry {
+  seq: number
+  kind: 'event'
+  time: string
+  requestId: string | null
+  level: 'ERROR' | 'WARN' | 'INFO' | 'DEBUG' | 'TRACE' | string
+  /// The Rust module that logged it.
+  target: string
+  message: string
+  fields: Record<string, unknown>
+}
+
+export type LogEntry = RequestLogEntry | EventLogEntry
+
+export interface LogPage {
+  /// False when the simulator was started without a log directory.
+  enabled: boolean
+  total: number
+  /// Newest first.
+  entries: LogEntry[]
+}

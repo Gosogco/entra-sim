@@ -1,4 +1,4 @@
-import type { Health, Snapshot, Tokens } from './types'
+import type { Health, LogPage, Snapshot, Tokens } from './types'
 
 /// Where the simulator is. Built, the studio is served by the simulator itself, so it reads from
 /// the origin that served it. Under `npm run dev` it reads from the plain HTTP listener, so the
@@ -52,6 +52,21 @@ async function getTokens(signal?: AbortSignal): Promise<{ body: Tokens | null }>
   if (response.status === 404) return { body: null }
   if (!response.ok) throw new Error(`GET /__sim__/tokens returned ${response.status}`)
   return { body: (await response.json()) as Tokens }
+}
+
+/// A page of the log: the newest entries before `before`, or the oldest after `after`. `null`
+/// when the simulator predates `/__sim__/logs`.
+export async function getLog(
+  position: { before?: number; after?: number },
+  signal?: AbortSignal,
+): Promise<LogPage | null> {
+  const query = new URLSearchParams()
+  if (position.before !== undefined) query.set('before', String(position.before))
+  if (position.after !== undefined) query.set('after', String(position.after))
+  const response = await request(`/__sim__/logs?${query}`, signal)
+  if (response.status === 404) return null
+  if (!response.ok) throw new Error(`GET /__sim__/logs returned ${response.status}`)
+  return (await response.json()) as LogPage
 }
 
 async function getJson<T>(
