@@ -47,7 +47,7 @@ alongside the React example's `run.sh`. Then it starts the studio on http://loca
 **1. Start the simulator**, on the loopback interface only (see the warning below):
 
 ```sh
-cd ../react-spa      # so step 2's setup script finds the CA in certs/
+cd ../examples/react-spa      # so step 2's setup script finds the CA in certs/
 mkdir -p certs
 docker run --rm --user "$(id -u):$(id -g)" \
   -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 -v "$PWD/certs:/certs" \
@@ -59,9 +59,9 @@ docker run --rm --user "$(id -u):$(id -g)" \
 registration and its service principal:
 
 ```sh
-cd ../react-spa
+cd ../examples/react-spa
 CA=certs/ca.pem scripts/setup.sh > .env
-cd ../entra-sim-studio
+cd ../../studio
 ```
 
 The script resets the directory first, so do not run it against a simulator holding objects you
@@ -132,7 +132,7 @@ npx playwright install chromium
 npm run e2e
 ```
 
-It expects the simulator at `VITE_SIM_URL`, seeded by `../react-spa/scripts/setup.sh` beforehand.
+It expects the simulator at `VITE_SIM_URL`, seeded by `../examples/react-spa/scripts/setup.sh` beforehand.
 The test does not run the script itself, because a test of a read-only viewer should not be what
 changes the directory. It checks that:
 

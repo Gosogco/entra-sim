@@ -35,7 +35,7 @@ export function UsersView() {
         { header: 'Created', cell: (u) => <Time at={u.createdDateTime} /> },
       ]}
       details={(u) => <UserDetails user={u} dir={dir} />}
-      empty="No users. Create one with POST /v1.0/users, or run ../react-spa/scripts/setup.sh."
+      empty="No users. Create one with POST /v1.0/users, or run examples/react-spa/scripts/setup.sh."
     />
   )
 }

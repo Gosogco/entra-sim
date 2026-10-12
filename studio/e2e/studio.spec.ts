@@ -1,14 +1,15 @@
 import { expect, test } from '@playwright/test'
 
-/// The user `../react-spa/scripts/setup.sh` creates. Override it when the setup ran with `UPN=`.
+/// The user `../examples/react-spa/scripts/setup.sh` creates. Override it when the setup ran
+/// with `UPN=`.
 const USER = process.env.E2E_USER ?? 'alice@example.test'
 
 /// The registration the simulator creates on start, so it exists even without any setup.
 const BOOTSTRAP_APP = 'entra-sim bootstrap client'
 
 // These read a running simulator and never write to it. Seeding is the job of
-// ../react-spa/scripts/setup.sh, run beforehand: a smoke test for a read-only viewer should not
-// itself be what changes the directory it is looking at.
+// ../examples/react-spa/scripts/setup.sh, run beforehand: a smoke test for a read-only viewer
+// should not itself be what changes the directory it is looking at.
 
 test('the Users tab lists the seeded user', async ({ page }) => {
   await page.goto('/#users')
