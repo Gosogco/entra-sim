@@ -17,6 +17,7 @@ use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+pub mod events;
 pub mod requests;
 
 pub const FILE_NAME: &str = "entra-sim.jsonl";
@@ -149,10 +150,10 @@ mod tests {
 
     use super::*;
 
-    struct TempDir(PathBuf);
+    pub(super) struct TempDir(pub(super) PathBuf);
 
     impl TempDir {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             Self(std::env::temp_dir().join(format!("entra-sim-log-{}", uuid::Uuid::new_v4())))
         }
     }

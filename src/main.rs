@@ -7,23 +7,36 @@ use clap::Parser;
 use entra_sim::auth::keys::SigningKey;
 use entra_sim::config::Config;
 use entra_sim::log::Log;
+use entra_sim::log::events::EventLayer;
 use entra_sim::state::AppState;
 use entra_sim::{router, tls};
 use tracing::info;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Layer};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
+    let config = Config::parse();
+    let log = config.log_dir.as_deref().map(Log::open).transpose()?;
+
+    // The log records more than stdout shows by default: everything the simulator itself says,
+    // whatever ENTRA_SIM_LOG is set to. Other crates stay at INFO, below which they describe
+    // every connection and frame.
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(
             EnvFilter::try_from_env("ENTRA_SIM_LOG").unwrap_or_else(|_| EnvFilter::new("info")),
+        ))
+        .with(
+            log.clone()
+                .map(|log| EventLayer(log).with_filter(EnvFilter::new("info,entra_sim=debug"))),
         )
         .init();
 
-    run(Config::parse()).await
+    run(config, log).await
 }
 
-async fn run(config: Config) -> Result<()> {
+async fn run(config: Config, log: Option<Log>) -> Result<()> {
     rustls::crypto::ring::default_provider()
         .install_default()
         .map_err(|_| anyhow::anyhow!("installing the ring crypto provider"))?;
@@ -40,7 +53,6 @@ async fn run(config: Config) -> Result<()> {
     let signing_key = Arc::new(load_signing_key(&config).await?);
     info!(kid = %signing_key.kid, "token signing key ready");
 
-    let log = config.log_dir.as_deref().map(Log::open).transpose()?;
     let state = AppState::with_seed(config, signing_key, log).await?;
     let app = router(state);
 
