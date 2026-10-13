@@ -9,6 +9,7 @@
 //! The simulator's objects are a superset of both versions, so one set of handlers answers for
 //! both; only the `@odata.context` differs, and it is built from the request's own prefix.
 
+pub mod administrative_units;
 pub mod app_role_assignments;
 pub mod applications;
 pub mod batch;
@@ -91,6 +92,7 @@ fn resources() -> Router<AppState> {
         .merge(users::router())
         .merge(conditional_access::router())
         .merge(role_schedules::router())
+        .merge(administrative_units::router())
         .merge(groups::router())
         .merge(applications::router())
         .merge(service_principals::router())

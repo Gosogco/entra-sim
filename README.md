@@ -203,6 +203,16 @@ token; the role then counts in `wids`, group claims, conditional access and the 
 until the requested time runs out, eight hours when none is given. The schedules are listed at
 `roleEligibilitySchedules` and `roleAssignmentSchedules`.
 
+## Administrative units
+
+Units are managed at `/directory/administrativeUnits`, with `members` and `scopedRoleMembers`,
+so `azuread_administrative_unit`, `azuread_administrative_unit_member` and
+`azuread_administrative_unit_role_member` work. Only the roles Microsoft lists as assignable over a
+unit can be scoped to one. A delegated call that changes or deletes another user needs the
+signed-in user to be a Global Administrator or User Administrator, or a User Administrator over a
+unit the user is a direct member of, through a scoped role membership or a PIM schedule; otherwise
+Graph answers `403`. Membership through a group in the unit does not count, as in Entra.
+
 ## Driving it from a test suite
 
 State is held in memory. Endpoints under `/__sim__` inspect and manage it, outside any Graph
@@ -250,8 +260,10 @@ breaks the simulator surfaces as a failing check rather than a confusing provide
 ## What it does not do
 
 - Writes are immediately readable; there is no eventual consistency to trip over.
-- Entitlement management, administrative units and synchronization jobs are
-  all out of scope.
+- Entitlement management and synchronization jobs are out of scope.
+- A delegated call is checked against the signed-in user's directory roles only when it changes
+  or deletes another user, and only User Administrator and Global Administrator count. Dynamic
+  and restricted management administrative units behave as ordinary ones.
 - PIM requests never wait for approval, and PIM for groups and Azure resources is not
   present.
 

@@ -175,3 +175,35 @@ resource "azuread_directory_role_eligibility_schedule_request" "engineer" {
   directory_scope_id = "/"
   justification      = "On call for password resets"
 }
+
+# The engineer manages the users in the platform unit, and only those.
+resource "azuread_directory_role" "user_administrator" {
+  template_id = "fe930be7-5e62-47db-91af-98c3a49a38b1"
+}
+
+resource "azuread_user" "operator" {
+  user_principal_name = "terraform-operator@${local.domain}"
+  display_name        = "Terraform Operator"
+  password            = "Sup3rSecret!Passw0rd"
+}
+
+resource "azuread_administrative_unit" "platform" {
+  display_name = "Platform"
+  description  = "Users the platform team manages"
+}
+
+resource "azuread_administrative_unit_member" "operator" {
+  administrative_unit_object_id = azuread_administrative_unit.platform.object_id
+  member_object_id              = azuread_user.operator.object_id
+}
+
+resource "azuread_administrative_unit_member" "platform" {
+  administrative_unit_object_id = azuread_administrative_unit.platform.object_id
+  member_object_id              = azuread_group.platform.object_id
+}
+
+resource "azuread_administrative_unit_role_member" "engineer" {
+  administrative_unit_object_id = azuread_administrative_unit.platform.object_id
+  role_object_id                = azuread_directory_role.user_administrator.object_id
+  member_object_id              = azuread_user.engineer.object_id
+}

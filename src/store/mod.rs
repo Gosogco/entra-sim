@@ -43,6 +43,12 @@ pub struct Directory {
     pub role_eligibility_schedules: BTreeMap<String, Value>,
     pub role_assignment_schedule_requests: BTreeMap<String, Value>,
     pub role_assignment_schedules: BTreeMap<String, Value>,
+    /// Administrative units, kept as Graph's JSON.
+    pub administrative_units: BTreeMap<String, Value>,
+    /// The users and groups in each administrative unit, by unit ID.
+    pub administrative_unit_members: BTreeMap<String, Vec<String>>,
+    /// Directory roles held over an administrative unit, kept as Graph's scopedRoleMembership.
+    pub scoped_role_memberships: BTreeMap<String, Value>,
 }
 
 impl Directory {
@@ -386,17 +392,68 @@ impl Directory {
             .collect()
     }
 
-    /// The principals holding a directory role through a PIM assignment schedule in force now.
+    /// The principals holding a directory role tenant-wide through a PIM assignment schedule in
+    /// force now.
     pub fn scheduled_role_holders(&self, role_template_id: &str) -> Vec<String> {
+        self.scheduled_holders(role_template_id, "/")
+    }
+
+    /// The principals holding a directory role over `directory_scope_id` through a PIM
+    /// assignment schedule in force now.
+    fn scheduled_holders(&self, role_template_id: &str, directory_scope_id: &str) -> Vec<String> {
         let now = time::OffsetDateTime::now_utc();
         self.role_assignment_schedules
             .values()
             .filter(|schedule| {
                 schedule["roleDefinitionId"] == role_template_id
+                    && schedule["directoryScopeId"] == directory_scope_id
                     && crate::graph::role_schedules::is_current(schedule, now)
             })
             .filter_map(|schedule| schedule["principalId"].as_str().map(str::to_string))
             .collect()
+    }
+
+    /// Whether a signed-in user may change or delete the user `target_id`. Global and User
+    /// Administrators may manage any user; a User Administrator held over an administrative unit,
+    /// by a scoped role membership or a PIM schedule, may manage the unit's direct user members.
+    pub fn may_manage_user(&self, caller_id: &str, target_id: &str) -> bool {
+        if self.directory_roles_of(caller_id).iter().any(|role| {
+            role.role_template_id == GLOBAL_ADMINISTRATOR_TEMPLATE_ID
+                || role.role_template_id == USER_ADMINISTRATOR_TEMPLATE_ID
+        }) {
+            return true;
+        }
+        let mut holders = vec![caller_id.to_string()];
+        holders.extend(
+            self.groups_containing(caller_id)
+                .into_iter()
+                .map(|group| group.id.clone()),
+        );
+        self.administrative_unit_members
+            .iter()
+            .filter(|(_, members)| members.iter().any(|member| member == target_id))
+            .any(|(unit_id, _)| {
+                let scoped = self.scoped_role_memberships.values().any(|membership| {
+                    membership["administrativeUnitId"] == unit_id.as_str()
+                        && membership["roleMemberInfo"]["id"]
+                            .as_str()
+                            .is_some_and(|member| holders.iter().any(|holder| holder == member))
+                        && membership["roleId"]
+                            .as_str()
+                            .and_then(|role_id| self.directory_roles.get(role_id))
+                            .is_some_and(|role| {
+                                role.role_template_id == USER_ADMINISTRATOR_TEMPLATE_ID
+                            })
+                });
+                scoped
+                    || self
+                        .scheduled_holders(
+                            USER_ADMINISTRATOR_TEMPLATE_ID,
+                            &format!("/administrativeUnits/{unit_id}"),
+                        )
+                        .iter()
+                        .any(|holder| holders.contains(holder))
+            })
     }
 
     /// Members of a group, following nested groups.
@@ -442,6 +499,8 @@ fn annotate<T: serde::Serialize>(kind: ObjectKind, object: &T) -> Value {
 
 /// The template ID of the built-in Global Administrator directory role.
 pub const GLOBAL_ADMINISTRATOR_TEMPLATE_ID: &str = "62e90394-69f5-4237-9190-012177145e10";
+/// The template ID of the built-in User Administrator directory role.
+pub const USER_ADMINISTRATOR_TEMPLATE_ID: &str = "fe930be7-5e62-47db-91af-98c3a49a38b1";
 
 /// The two access token formats Entra issues for a registered API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

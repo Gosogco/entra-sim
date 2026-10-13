@@ -1136,6 +1136,8 @@ The simulator does not support these:
 | Eventual consistency | A write is readable at once. Real Entra is slower. |
 | Entitlement management | Not present |
 | PIM approval, and PIM for groups | Every directory role request completes at once; group eligibility is not present |
+| Directory role checks on delegated calls | Only a change or deletion of another user checks the signed-in user's roles; other delegated calls are judged on `scp` alone |
+| Dynamic and restricted management administrative units | Stored, but membership is never computed from a rule and tenant administrators are not shut out |
 | Conditional access conditions on locations, platforms, devices and risk | A policy limited by one of these never applies |
 
 A route that the permission table does not cover is **allowed**, with a

@@ -31,6 +31,10 @@ pub struct Snapshot {
     pub role_eligibility_schedules: Vec<serde_json::Value>,
     pub role_assignment_schedule_requests: Vec<serde_json::Value>,
     pub role_assignment_schedules: Vec<serde_json::Value>,
+    pub administrative_units: Vec<serde_json::Value>,
+    /// The users and groups in each administrative unit, by unit ID.
+    pub administrative_unit_members: BTreeMap<String, Vec<String>>,
+    pub scoped_role_memberships: Vec<serde_json::Value>,
     /// Group membership and ownership, which are navigation properties and so are not carried
     /// on the group itself.
     pub group_links: Vec<GroupLinks>,
@@ -137,6 +141,13 @@ impl Snapshot {
                 .values()
                 .cloned()
                 .collect(),
+            administrative_units: directory.administrative_units.values().cloned().collect(),
+            administrative_unit_members: directory.administrative_unit_members.clone(),
+            scoped_role_memberships: directory
+                .scoped_role_memberships
+                .values()
+                .cloned()
+                .collect(),
             group_links: directory
                 .groups
                 .values()
@@ -232,6 +243,9 @@ impl Snapshot {
                 json_id,
             ),
             role_assignment_schedules: by_id(self.role_assignment_schedules, json_id),
+            administrative_units: by_id(self.administrative_units, json_id),
+            administrative_unit_members: self.administrative_unit_members,
+            scoped_role_memberships: by_id(self.scoped_role_memberships, json_id),
         };
 
         // Reattach everything the entities do not carry themselves.

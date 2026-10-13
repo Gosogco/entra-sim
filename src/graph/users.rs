@@ -15,6 +15,7 @@ use crate::graph::error::GraphError;
 use crate::graph::{collection_response, object_response};
 use crate::odata::RawQuery;
 use crate::state::AppState;
+use crate::store::Directory;
 use crate::store::model::User;
 
 pub fn router() -> Router<AppState> {
@@ -157,7 +158,7 @@ async fn create(
 
 async fn update(
     State(state): State<AppState>,
-    _caller: Caller,
+    caller: Caller,
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<StatusCode, GraphError> {
@@ -167,6 +168,9 @@ async fn update(
 
     let mut directory = state.store.write().await;
     let key = lookup_key(&directory, &id).ok_or_else(|| GraphError::resource_not_found(&id))?;
+    if caller.claims.oid != key {
+        require_user_manager(&directory, &caller, &key)?;
+    }
     let user = directory.users.get_mut(&key).expect("key came from lookup");
 
     for (property, value) in patch {
@@ -180,14 +184,29 @@ async fn update(
 
 async fn delete(
     State(state): State<AppState>,
-    _caller: Caller,
+    caller: Caller,
     Path(id): Path<String>,
 ) -> Result<StatusCode, GraphError> {
     let mut directory = state.store.write().await;
     let key = lookup_key(&directory, &id).ok_or_else(|| GraphError::resource_not_found(&id))?;
+    require_user_manager(&directory, &caller, &key)?;
     directory.users.remove(&key);
     info!(user_id = %key, "deleted user");
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// A delegated call acts with the signed-in user's privileges as well as the app's scopes, so
+/// changing another user needs a directory role that manages users, tenant-wide or over an
+/// administrative unit the user is in. An app-only call has only its app roles to satisfy.
+fn require_user_manager(
+    directory: &Directory,
+    caller: &Caller,
+    target_id: &str,
+) -> Result<(), GraphError> {
+    if caller.claims.scp.is_none() || directory.may_manage_user(&caller.claims.oid, target_id) {
+        return Ok(());
+    }
+    Err(GraphError::authorization_request_denied())
 }
 
 /// Apply one property from a PATCH body.
