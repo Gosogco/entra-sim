@@ -1422,3 +1422,48 @@ async fn a_role_on_a_group_that_is_not_a_security_group_does_not_reach_the_user(
     let claims = common::decode_claims(tokens["access_token"].as_str().unwrap());
     assert!(claims.get("roles").is_none(), "{claims}");
 }
+
+#[tokio::test]
+async fn a_refresh_naming_a_revoked_permission_is_narrowed_not_refused() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let fixture = fixture(&graph).await;
+
+    let first = complete_flow(
+        &sim,
+        &fixture,
+        "openid offline_access User.Read",
+        Some(VERIFIER),
+    )
+    .await;
+    let grants = graph.get_ok("/v1.0/oauth2PermissionGrants").await;
+    let grant_id = grants["value"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|grant| grant["scope"] == "User.Read")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    graph
+        .delete(&format!("/v1.0/oauth2PermissionGrants/{grant_id}"))
+        .await;
+
+    // msal-browser names its scopes on every silent refresh.
+    let response = browser()
+        .post(sim.url(&format!("/{}/oauth2/v2.0/token", sim.tenant_id)))
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", fixture.client_id.as_str()),
+            ("refresh_token", first["refresh_token"].as_str().unwrap()),
+            ("scope", "User.Read openid profile offline_access"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let refreshed: serde_json::Value = response.json().await.unwrap();
+    let claims = common::decode_claims(refreshed["access_token"].as_str().unwrap());
+    assert_eq!(claims["scp"], "");
+}

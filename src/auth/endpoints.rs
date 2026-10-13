@@ -266,8 +266,7 @@ async fn authorization_code(
             &issued.user_id,
             &issued.scope,
             request.scope.as_deref(),
-            // Microsoft: at code redemption "The scopes must all be from a single resource".
-            MultipleResources::Refuse,
+            Redemption::AuthorizationCode,
         )?
     };
 
@@ -340,10 +339,7 @@ async fn refresh_token(
             &issued.user_id,
             &issued.scope,
             request.scope.as_deref(),
-            // Microsoft: "If the scopes specified in this request span multiple resource server,
-            // then the Microsoft identity platform returns a token for the resource specified in
-            // the first scope."
-            MultipleResources::TakeFirst,
+            Redemption::RefreshToken,
         )?
     };
 
@@ -366,11 +362,18 @@ async fn refresh_token(
     .await
 }
 
-/// What to do when a token request's scope names more than one API.
+/// Which grant is redeeming the sign-in. Microsoft documents different rules for the two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MultipleResources {
-    Refuse,
-    TakeFirst,
+enum Redemption {
+    /// "The scopes must all be from a single resource", and a named permission that was never
+    /// consented gives `consent_required`, which Microsoft says is "Returned when a scope
+    /// parameter was used on the code redemption flow that the client app doesn't have
+    /// permission to request."
+    AuthorizationCode,
+    /// "If the scopes specified in this request span multiple resource server, then the
+    /// Microsoft identity platform returns a token for the resource specified in the first
+    /// scope." Permissions no longer consented are left out of the token.
+    RefreshToken,
 }
 
 /// The API a user token is for, and the permissions the user consented to on it.
@@ -398,7 +401,7 @@ fn user_token_target(
     user_id: &str,
     authorized_scope: &str,
     requested_scope: Option<&str>,
-    multiple: MultipleResources,
+    redemption: Redemption,
 ) -> Result<UserTokenTarget, OAuthFailure> {
     let base_url = state.config.public_base_url();
     let (authorized_oidc, authorized_named) = scopes::parse(authorized_scope);
@@ -412,7 +415,10 @@ fn user_token_target(
     let mut resources = scopes::resolve(directory, &base_url, &named)
         .map_err(|unknown| oauth_error::invalid_resource(&unknown, tenant))?;
     // The sign-in may have named several APIs; only the redemption's own scope must name one.
-    if resources.len() > 1 && multiple == MultipleResources::Refuse && !requested_named.is_empty() {
+    if resources.len() > 1
+        && redemption == Redemption::AuthorizationCode
+        && !requested_named.is_empty()
+    {
         return Err(oauth_error::invalid_scope(
             requested_scope.unwrap_or_default(),
         ));
@@ -432,7 +438,8 @@ fn user_token_target(
     };
 
     let granted = directory.consented_scopes(client_id, user_id, &resource.principal_id);
-    if !requested_named.is_empty()
+    if redemption == Redemption::AuthorizationCode
+        && !requested_named.is_empty()
         && let Some(missing) = resource
             .named_scopes()
             .find(|scope| !granted.contains(scope))
