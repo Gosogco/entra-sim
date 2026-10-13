@@ -167,6 +167,111 @@ pub fn issue_user_token(
     Ok((token, request.ttl_seconds))
 }
 
+/// How the client proved its identity, reported as `azpacr` in a v2 token and `appidacr` in a v1
+/// token: `0` for a public client, `1` for a client secret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientAuth {
+    Public,
+    Secret,
+}
+
+impl ClientAuth {
+    fn code(self) -> &'static str {
+        match self {
+            Self::Public => "0",
+            Self::Secret => APPIDACR_CLIENT_SECRET,
+        }
+    }
+}
+
+/// Who a token for a registered API represents.
+pub enum ApiTokenSubject<'a> {
+    /// The client application itself, through the client credentials grant.
+    App { principal_id: &'a str },
+    /// A signed-in user, with the delegated permissions the client holds for them.
+    User {
+        user_id: &'a str,
+        user_principal_name: &'a str,
+        display_name: &'a str,
+        /// Space-separated delegated permissions on the API.
+        scope: &'a str,
+    },
+}
+
+/// Everything needed to mint an access token for an API registered in the directory, as
+/// opposed to Microsoft Graph.
+pub struct ApiTokenRequest<'a> {
+    /// The API's `appId`. Microsoft: "In v2.0 tokens, this value is always the client ID of the
+    /// API."
+    pub audience: &'a str,
+    pub issuer: &'a str,
+    pub tenant_id: &'a str,
+    pub client_id: &'a str,
+    pub client_auth: ClientAuth,
+    pub subject: ApiTokenSubject<'a>,
+    /// App roles the subject holds on the API.
+    pub roles: Vec<String>,
+    pub ttl_seconds: u64,
+}
+
+/// Mint and sign a v2.0 access token for a registered API.
+///
+/// The claims follow Microsoft's access token claims reference for v2.0 tokens: `azp` and
+/// `azpacr` name the client, `idtyp` is `app` only on an app-only token, and a user token
+/// carries `scp`, `name` and `preferred_username` and, when the user holds roles on the API,
+/// `roles`.
+pub fn issue_api_token(
+    key: &SigningKey,
+    request: ApiTokenRequest<'_>,
+    now: OffsetDateTime,
+) -> Result<(String, u64)> {
+    use serde_json::{Value, json};
+
+    let issued_at = now.unix_timestamp();
+    let mut claims = serde_json::Map::new();
+    let mut set = |name: &str, value: Value| {
+        claims.insert(name.to_string(), value);
+    };
+    set("aud", json!(request.audience));
+    set("iss", json!(request.issuer));
+    set("iat", json!(issued_at));
+    set("nbf", json!(issued_at));
+    set("exp", json!(issued_at + request.ttl_seconds as i64));
+    set("azp", json!(request.client_id));
+    set("azpacr", json!(request.client_auth.code()));
+    set("tid", json!(request.tenant_id));
+    set("ver", json!("2.0"));
+
+    match request.subject {
+        ApiTokenSubject::App { principal_id } => {
+            set("idtyp", json!("app"));
+            set("oid", json!(principal_id));
+            set("sub", json!(principal_id));
+        }
+        ApiTokenSubject::User {
+            user_id,
+            user_principal_name,
+            display_name,
+            scope,
+        } => {
+            set("oid", json!(user_id));
+            set("sub", json!(user_id));
+            set("name", json!(display_name));
+            set("preferred_username", json!(user_principal_name));
+            // Microsoft: `scp` is "Only included for user tokens".
+            set("scp", json!(scope));
+        }
+    }
+    if !request.roles.is_empty() {
+        set("roles", json!(request.roles));
+    }
+
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = Some(key.kid.clone());
+    let token = encode(&header, &claims, &key.encoding).context("signing the access token")?;
+    Ok((token, request.ttl_seconds))
+}
+
 /// An OpenID Connect ID token, which describes the signed-in user to the client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdTokenClaims {

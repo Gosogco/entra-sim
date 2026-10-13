@@ -12,8 +12,12 @@ use tracing::{info, warn};
 
 use crate::auth::oauth_error::{self, OAuthFailure};
 use crate::auth::sessions::{Grant, IssuedToken, SubjectKind, TokenKind};
-use crate::auth::token::{AppTokenRequest, issue_app_token, issue_user_token};
+use crate::auth::token::{
+    ApiTokenRequest, ApiTokenSubject, AppTokenRequest, ClientAuth, issue_api_token,
+    issue_app_token, issue_user_token,
+};
 use crate::state::AppState;
+use crate::store::model::MICROSOFT_GRAPH_APP_ID;
 
 /// A token request. Fields are shared across grant types, so all are optional here and the
 /// handler for each grant enforces what it needs.
@@ -83,15 +87,11 @@ async fn client_credentials(
     // The app-only flow is always `{resource}/.default`: it asks for every app role already
     // granted, because there is no user present to consent to anything narrower.
     let scope = request.scope.as_deref().unwrap_or_default();
-    let resource = resource_from_scope(scope)
+    let resource_name = resource_from_scope(scope)
         .ok_or_else(|| oauth_error::invalid_scope(scope))?
         .to_string();
 
     let advertised = state.config.public_base_url();
-    if resource != advertised {
-        return Err(oauth_error::invalid_scope(scope));
-    }
-
     let now = OffsetDateTime::now_utc();
     let directory = state.store.read().await;
 
@@ -114,23 +114,51 @@ async fn client_credentials(
         )));
     };
 
+    let Some(resource) = directory.resource_for(&resource_name, &advertised) else {
+        return Err(oauth_error::invalid_resource(&resource_name, tenant));
+    };
+
     let issuer = format!("{advertised}/{tenant}/v2.0");
-    let roles = directory.granted_graph_role_values(&principal.id);
-    let (access_token, expires_in) = issue_app_token(
-        &state.signing_key,
-        AppTokenRequest {
-            audience: &resource,
-            issuer: &issuer,
-            tenant_id: tenant,
-            client_id: &client_id,
-            principal_id: &principal.id,
-            display_name: Some(&application.display_name),
-            roles: roles.clone(),
-            ttl_seconds: state.config.token_ttl_seconds,
-        },
-        now,
-    )
-    .map_err(|error| oauth_error::server_error(error.to_string()))?;
+    let roles = directory.granted_role_values(std::slice::from_ref(&principal.id), &resource.id);
+    let (audience, signed) = if resource.app_id == MICROSOFT_GRAPH_APP_ID {
+        // Graph tokens keep the simulator's own URL as their audience, whichever name the client
+        // used, because that is what the simulator's Graph surface validates against.
+        let signed = issue_app_token(
+            &state.signing_key,
+            AppTokenRequest {
+                audience: &advertised,
+                issuer: &issuer,
+                tenant_id: tenant,
+                client_id: &client_id,
+                principal_id: &principal.id,
+                display_name: Some(&application.display_name),
+                roles: roles.clone(),
+                ttl_seconds: state.config.token_ttl_seconds,
+            },
+            now,
+        );
+        (advertised.clone(), signed)
+    } else {
+        let signed = issue_api_token(
+            &state.signing_key,
+            ApiTokenRequest {
+                audience: &resource.app_id,
+                issuer: &issuer,
+                tenant_id: tenant,
+                client_id: &client_id,
+                client_auth: ClientAuth::Secret,
+                subject: ApiTokenSubject::App {
+                    principal_id: &principal.id,
+                },
+                roles: roles.clone(),
+                ttl_seconds: state.config.token_ttl_seconds,
+            },
+            now,
+        );
+        (resource.app_id.clone(), signed)
+    };
+    let (access_token, expires_in) =
+        signed.map_err(|error| oauth_error::server_error(error.to_string()))?;
 
     let issued = IssuedToken {
         id: uuid::Uuid::new_v4().to_string(),
@@ -140,7 +168,7 @@ async fn client_credentials(
         subject_id: principal.id.clone(),
         subject_kind: SubjectKind::ServicePrincipal,
         subject_name: application.display_name.clone(),
-        audience: resource.clone(),
+        audience,
         scopes: Vec::new(),
         roles,
         issued_at: now,
@@ -572,7 +600,8 @@ fn percent_decode(value: &str) -> String {
 /// Pull the resource out of a `{resource}/.default` scope.
 ///
 /// `go-azure-sdk` builds exactly this from the `microsoftGraphResourceId` in the metadata
-/// document, so the resource it names is the simulator's own base URL.
+/// document, so for the Terraform provider the resource it names is the simulator's own base
+/// URL. Any other client names an API by its identifier URI or its appId.
 fn resource_from_scope(scope: &str) -> Option<&str> {
     scope
         .split_whitespace()

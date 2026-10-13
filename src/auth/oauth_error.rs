@@ -116,6 +116,23 @@ pub fn invalid_scope(scope: &str) -> OAuthFailure {
     }
 }
 
+/// The scope names an API that is not in the directory.
+pub fn invalid_resource(resource: &str, tenant: &str) -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "invalid_resource",
+            500011,
+            format!(
+                "AADSTS500011: The resource principal named {resource} was not found in the \
+                 tenant named {tenant}. This can happen if the application has not been \
+                 installed by the administrator of the tenant or consented to by any user in the \
+                 tenant. You might have sent your authentication request to the wrong tenant."
+            ),
+        ),
+    }
+}
+
 /// The presented grant — a code, a refresh token — is not usable.
 pub fn invalid_grant(description: impl Into<String>) -> OAuthFailure {
     OAuthFailure {

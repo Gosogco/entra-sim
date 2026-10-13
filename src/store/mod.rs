@@ -114,18 +114,6 @@ impl Directory {
         })
     }
 
-    /// The app role values granted to a principal on the Graph resource.
-    ///
-    /// This is what fills an app-only token's `roles` claim. Entra derives it by resolving the
-    /// principal's app role assignments against the resource's defined roles, and so does this:
-    /// an assignment naming a role the resource does not define grants nothing.
-    pub fn granted_graph_role_values(&self, principal_id: &str) -> Vec<String> {
-        let Some(resource) = self.graph_service_principal() else {
-            return Vec::new();
-        };
-        self.granted_role_values(&[principal_id.to_string()], &resource.id)
-    }
-
     /// The app role values any of `principal_ids` holds on the resource `resource_id`.
     ///
     /// For an app-only token that is the client's own principal. For a user token it is the

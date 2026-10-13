@@ -389,3 +389,204 @@ pub fn decode_claims(token: &str) -> serde_json::Value {
         .expect("the claims should be base64url");
     serde_json::from_slice(&bytes).expect("the claims should be JSON")
 }
+
+/// An API registered in the directory, with the IDs of the roles and scopes it defines.
+pub struct Api {
+    pub object_id: String,
+    pub app_id: String,
+    pub principal_id: String,
+    pub identifier_uri: String,
+    /// Role value to role ID.
+    pub roles: std::collections::HashMap<String, String>,
+    /// Scope value to scope ID.
+    pub scopes: std::collections::HashMap<String, String>,
+}
+
+/// A client application with a secret and a service principal.
+pub struct Client {
+    pub object_id: String,
+    pub app_id: String,
+    pub principal_id: String,
+    pub secret: String,
+}
+
+impl Graph {
+    /// Register an API at `identifier_uri` that defines `roles`, which users and applications
+    /// may both hold, and the delegated `scopes`, then create its service principal.
+    pub async fn register_api(
+        &self,
+        display_name: &str,
+        identifier_uri: &str,
+        roles: &[&str],
+        scopes: &[&str],
+        extra: serde_json::Value,
+    ) -> Api {
+        let role_ids: std::collections::HashMap<String, String> = roles
+            .iter()
+            .map(|role| (role.to_string(), uuid::Uuid::new_v4().to_string()))
+            .collect();
+        let scope_ids: std::collections::HashMap<String, String> = scopes
+            .iter()
+            .map(|scope| (scope.to_string(), uuid::Uuid::new_v4().to_string()))
+            .collect();
+
+        let mut body = serde_json::json!({
+            "displayName": display_name,
+            "identifierUris": [identifier_uri],
+            "appRoles": role_ids.iter().map(|(value, id)| serde_json::json!({
+                "id": id,
+                "value": value,
+                "displayName": value,
+                "description": format!("{value} on {display_name}"),
+                "isEnabled": true,
+                "allowedMemberTypes": ["User", "Application"]
+            })).collect::<Vec<_>>(),
+            "api": {
+                "oauth2PermissionScopes": scope_ids.iter().map(|(value, id)| serde_json::json!({
+                    "id": id,
+                    "value": value,
+                    "adminConsentDisplayName": value,
+                    "adminConsentDescription": format!("{value} on {display_name}"),
+                    "isEnabled": true,
+                    "type": "User"
+                })).collect::<Vec<_>>()
+            }
+        });
+        if let (Some(body), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
+            for (key, value) in extra {
+                if key == "api" {
+                    let api = body["api"].as_object_mut().unwrap();
+                    for (api_key, api_value) in value.as_object().unwrap() {
+                        api.insert(api_key.clone(), api_value.clone());
+                    }
+                } else {
+                    body.insert(key.clone(), value.clone());
+                }
+            }
+        }
+
+        let application = self.post_created("/v1.0/applications", &body).await;
+        let app_id = application["appId"].as_str().unwrap().to_string();
+        let principal = self
+            .post_created(
+                "/v1.0/servicePrincipals",
+                &serde_json::json!({ "appId": app_id }),
+            )
+            .await;
+
+        Api {
+            object_id: application["id"].as_str().unwrap().to_string(),
+            app_id,
+            principal_id: principal["id"].as_str().unwrap().to_string(),
+            identifier_uri: identifier_uri.to_string(),
+            roles: role_ids,
+            scopes: scope_ids,
+        }
+    }
+
+    /// Register a confidential client with a secret, `extra` merged into its registration.
+    pub async fn register_client(&self, display_name: &str, extra: serde_json::Value) -> Client {
+        let mut body = serde_json::json!({ "displayName": display_name });
+        if let (Some(body), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
+            for (key, value) in extra {
+                body.insert(key.clone(), value.clone());
+            }
+        }
+        let application = self.post_created("/v1.0/applications", &body).await;
+        let object_id = application["id"].as_str().unwrap().to_string();
+        let app_id = application["appId"].as_str().unwrap().to_string();
+        let principal = self
+            .post_created(
+                "/v1.0/servicePrincipals",
+                &serde_json::json!({ "appId": app_id }),
+            )
+            .await;
+        let secret = self
+            .post_created_or_ok(
+                &format!("/v1.0/applications/{object_id}/addPassword"),
+                &serde_json::json!({}),
+            )
+            .await;
+
+        Client {
+            object_id,
+            app_id,
+            principal_id: principal["id"].as_str().unwrap().to_string(),
+            secret: secret["secretText"].as_str().unwrap().to_string(),
+        }
+    }
+
+    /// Assign `role` on `api` to the user, group or service principal `principal_id`.
+    pub async fn assign_role(&self, principal_id: &str, api: &Api, role: &str) {
+        self.post_created(
+            &format!(
+                "/v1.0/servicePrincipals/{}/appRoleAssignedTo",
+                api.principal_id
+            ),
+            &serde_json::json!({
+                "principalId": principal_id,
+                "resourceId": api.principal_id,
+                "appRoleId": api.roles[role]
+            }),
+        )
+        .await;
+    }
+
+    /// Create a user, returning its object ID.
+    pub async fn create_user(&self, upn: &str, display_name: &str) -> String {
+        let user = self
+            .post_created(
+                "/v1.0/users",
+                &serde_json::json!({
+                    "displayName": display_name,
+                    "userPrincipalName": upn,
+                    "mailNickname": upn.split('@').next().unwrap(),
+                    "accountEnabled": true,
+                    "passwordProfile": { "password": "Sup3rSecret!" }
+                }),
+            )
+            .await;
+        user["id"].as_str().unwrap().to_string()
+    }
+
+    /// Create a security group with `members`, returning its object ID.
+    pub async fn create_group(&self, display_name: &str, members: &[&str]) -> String {
+        let group = self
+            .post_created(
+                "/v1.0/groups",
+                &serde_json::json!({
+                    "displayName": display_name,
+                    "mailEnabled": false,
+                    "mailNickname": display_name.replace(' ', "-").to_lowercase(),
+                    "securityEnabled": true
+                }),
+            )
+            .await;
+        let id = group["id"].as_str().unwrap().to_string();
+        for member in members {
+            let response = self
+                .post(
+                    &format!("/v1.0/groups/{id}/members/$ref"),
+                    &serde_json::json!({
+                        "@odata.id": format!("https://graph.microsoft.com/v1.0/directoryObjects/{member}")
+                    }),
+                )
+                .await;
+            assert_eq!(response.status(), 204, "adding {member} to {display_name}");
+        }
+        id
+    }
+}
+
+impl Sim {
+    /// Request a client-credentials token for `scope` as `client`, returning the raw response.
+    pub async fn app_token(&self, client: &Client, scope: &str) -> reqwest::Response {
+        self.token_request(&[
+            ("grant_type", "client_credentials"),
+            ("client_id", &client.app_id),
+            ("client_secret", &client.secret),
+            ("scope", scope),
+        ])
+        .await
+    }
+}
