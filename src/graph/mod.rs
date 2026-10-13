@@ -17,6 +17,7 @@ pub mod groups;
 pub mod permissions_catalogue;
 pub mod service_principals;
 pub mod tenant;
+pub mod userinfo;
 pub mod users;
 
 use axum::Json;
@@ -30,7 +31,11 @@ use crate::state::AppState;
 pub const VERSIONS: [&str; 2] = ["/v1.0", "/beta"];
 
 pub fn router() -> Router<AppState> {
-    let mut router = Router::new();
+    // UserInfo sits outside the versioned paths, as on Graph.
+    let mut router = Router::new().route(
+        "/oidc/userinfo",
+        axum::routing::get(userinfo::userinfo).post(userinfo::userinfo),
+    );
     for version in VERSIONS {
         router = router.nest(version, resources());
     }

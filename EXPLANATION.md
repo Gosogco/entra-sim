@@ -1035,6 +1035,8 @@ GET  /{tenant}/oauth2/v2.0/authorize                      Sign-in page
 POST /{tenant}/oauth2/v2.0/authorize                      Choose a user
 POST /{tenant}/oauth2/v2.0/token                          All three grants
 GET  /{tenant}/oauth2/v2.0/logout                         Sign out
+GET  /oidc/userinfo                                       UserInfo, with a Graph token
+POST /oidc/userinfo
 ```
 
 **Graph endpoints.** Each one works under `/v1.0` and under `/beta`.
