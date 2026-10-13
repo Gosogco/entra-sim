@@ -228,6 +228,18 @@ pub struct PasswordCredential {
     pub secret_text: String,
 }
 
+impl Application {
+    /// Whether `secret` is one of the application's current secrets.
+    ///
+    /// Secrets live on the application, matching Entra: an app registration owns its
+    /// credentials and the service principal is what the resulting token represents.
+    pub fn accepts_secret(&self, secret: &str, now: OffsetDateTime) -> bool {
+        self.password_credentials
+            .iter()
+            .any(|credential| credential.accepts(secret, now))
+    }
+}
+
 impl PasswordCredential {
     /// Whether `secret` matches and the credential is valid at `now`.
     pub fn accepts(&self, secret: &str, now: OffsetDateTime) -> bool {

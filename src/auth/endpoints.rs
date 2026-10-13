@@ -140,9 +140,10 @@ async fn client_credentials(
     let advertised = state.config.public_base_url();
     let now = OffsetDateTime::now_utc();
     let client_auth = authenticate(state, tenant, &client_id, &presented, now).await?;
+    let foreign = state.foreign_registrations().await;
     let directory = state.store.read().await;
 
-    let Some(application) = directory.application_by_app_id(&client_id) else {
+    let Some(application) = directory.registration(&foreign, &client_id) else {
         return Err(oauth_error::unknown_client(&client_id));
     };
 
@@ -187,7 +188,8 @@ async fn client_credentials(
         );
         (advertised.clone(), signed)
     } else {
-        let version = directory.requested_access_token_version(&resource.app_id);
+        let version =
+            TokenVersion::requested_by(directory.registration(&foreign, &resource.app_id));
         let audience = api_audience(version, &resource.app_id, &resource_name);
         let signed = issue_api_token(
             &state.signing_key,
@@ -885,6 +887,7 @@ async fn issue_user_tokens(
         access_groups,
         id_groups,
     ) = {
+        let foreign = state.foreign_registrations().await;
         let directory = state.store.read().await;
         let user = directory.users.get(user_id).ok_or_else(|| {
             oauth_error::no_grant("AADSTS50034: The user account does not exist in the directory.")
@@ -903,15 +906,27 @@ async fn issue_user_tokens(
             .unwrap_or_default();
         // Each token carries the group claims of the application it is issued for: the API for
         // the access token, the client for the ID token.
-        let group_claims = |app_id: &str, token_type| {
-            claims::group_claims(&directory, tenant, user_id, app_id, token_type)
-        };
-        let mut access_groups = group_claims(&resource.app_id, TokenType::Access);
-        let mut id_groups = group_claims(client_id, TokenType::Id);
-        let version = directory.requested_access_token_version(&resource.app_id);
-        let access_optional = claims::optional_claims(
+        let api_registration = directory.registration(&foreign, &resource.app_id);
+        let client_registration = directory.registration(&foreign, client_id);
+        let mut access_groups = claims::group_claims(
             &directory,
+            tenant,
+            user_id,
             &resource.app_id,
+            api_registration,
+            TokenType::Access,
+        );
+        let mut id_groups = claims::group_claims(
+            &directory,
+            tenant,
+            user_id,
+            client_id,
+            client_registration,
+            TokenType::Id,
+        );
+        let version = TokenVersion::requested_by(api_registration);
+        let access_optional = claims::optional_claims(
+            api_registration,
             TokenType::Access,
             version,
             user,
@@ -919,8 +934,7 @@ async fn issue_user_tokens(
         );
         // ID tokens come from the v2.0 endpoint, the only one the simulator implements.
         let id_optional = claims::optional_claims(
-            &directory,
-            client_id,
+            client_registration,
             TokenType::Id,
             TokenVersion::V2,
             user,
@@ -1163,16 +1177,26 @@ async fn authenticate(
     presented: &Presented,
     now: OffsetDateTime,
 ) -> Result<ClientAuth, OAuthFailure> {
+    // The client's registration may be held by another tenant, for a multitenant application
+    // with a service principal here. Without one it is unknown to this tenant, as in Entra.
+    let foreign = state.foreign_registrations().await;
+    let application = {
+        let directory = state.store.read().await;
+        let registration = directory
+            .registration(&foreign, client_id)
+            .cloned()
+            .ok_or_else(|| oauth_error::unknown_client(client_id))?;
+        if directory.application_by_app_id(client_id).is_none()
+            && directory.service_principal_by_app_id(client_id).is_none()
+        {
+            return Err(oauth_error::unknown_client(client_id));
+        }
+        registration
+    };
+
     let assertion = match presented {
         Presented::Secret(secret) => {
-            let directory = state.store.read().await;
-            if directory.application_by_app_id(client_id).is_none() {
-                return Err(oauth_error::unknown_client(client_id));
-            }
-            if directory
-                .matching_credential(client_id, secret, now)
-                .is_none()
-            {
+            if !application.accepts_secret(secret, now) {
                 warn!(client_id, "rejected a token request with an invalid secret");
                 return Err(oauth_error::invalid_client_secret());
             }
@@ -1185,9 +1209,8 @@ async fn authenticate(
         .ok_or_else(|| oauth_error::invalid_jwt("The assertion is not a well-formed JWT."))?;
     let issuer = claims["iss"].as_str().unwrap_or_default().to_string();
     if issuer == client_id {
-        let directory = state.store.read().await;
         client_auth::verify_certificate_assertion(
-            &directory,
+            &application,
             client_id,
             assertion,
             &token_endpoint_urls(state, tenant),
@@ -1196,11 +1219,7 @@ async fn authenticate(
         return Ok(ClientAuth::Certificate);
     }
 
-    // The lock is released before any network call.
-    let federated = {
-        let directory = state.store.read().await;
-        client_auth::matching_federated_credential(&directory, client_id, &claims)?
-    };
+    let federated = client_auth::matching_federated_credential(&application, &claims)?;
     let base = state.config.public_base_url();
     let own_issuers = [
         format!("{base}/{tenant}/v2.0"),

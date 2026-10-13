@@ -87,6 +87,21 @@ impl AppState {
             .collect()
     }
 
+    /// The application registrations held by every other tenant.
+    ///
+    /// An application registered in one tenant can have a service principal in another, and
+    /// Entra applies its registration's settings to tokens issued there. Gathered before taking
+    /// this tenant's own lock, so no lock is held while waiting for another.
+    pub async fn foreign_registrations(&self) -> Vec<crate::store::model::Application> {
+        let mut registrations = Vec::new();
+        for tenant in self.all_tenants() {
+            if tenant.config.tenant_id != self.config.tenant_id {
+                registrations.extend(tenant.store.read().await.applications.values().cloned());
+            }
+        }
+        registrations
+    }
+
     /// The tenant a path segment names, by ID or domain.
     pub fn tenant_named(&self, segment: &str) -> Option<AppState> {
         self.tenants

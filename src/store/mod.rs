@@ -14,15 +14,14 @@ pub mod snapshot;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use time::OffsetDateTime;
 use tokio::sync::RwLock;
 
 use serde_json::Value;
 
 use crate::store::model::MICROSOFT_GRAPH_APP_ID;
 use crate::store::model::{
-    AppRoleAssignment, Application, DirectoryRole, Group, OAuth2PermissionGrant,
-    PasswordCredential, ServicePrincipal, User,
+    AppRoleAssignment, Application, DirectoryRole, Group, OAuth2PermissionGrant, ServicePrincipal,
+    User,
 };
 
 /// Everything the simulated tenant contains.
@@ -54,22 +53,6 @@ impl Directory {
         self.service_principals
             .values()
             .find(|sp| sp.app_id == app_id)
-    }
-
-    /// Find the credential matching `secret` for the client `app_id`, if any.
-    ///
-    /// Secrets live on the application, matching Entra: an app registration owns its
-    /// credentials and the service principal is what the resulting token represents.
-    pub fn matching_credential(
-        &self,
-        app_id: &str,
-        secret: &str,
-        now: OffsetDateTime,
-    ) -> Option<&PasswordCredential> {
-        self.application_by_app_id(app_id)?
-            .password_credentials
-            .iter()
-            .find(|credential| credential.accepts(secret, now))
     }
 }
 
@@ -162,21 +145,18 @@ impl Directory {
         })
     }
 
-    /// The access token version the API `app_id` asks for in `api.requestedAccessTokenVersion`.
-    ///
-    /// Microsoft: "The values of `null` and `1` result in v1.0 tokens, and the value of `2`
-    /// results in v2.0 tokens." An API with no registration in this tenant has no setting, so
-    /// it gets v1.0 tokens as well.
-    pub fn requested_access_token_version(&self, app_id: &str) -> TokenVersion {
-        let requested = self
-            .application_by_app_id(app_id)
-            .and_then(|application| application.extra.get("api"))
-            .and_then(|api| api.get("requestedAccessTokenVersion"))
-            .and_then(Value::as_u64);
-        match requested {
-            Some(2) => TokenVersion::V2,
-            _ => TokenVersion::V1,
-        }
+    /// The registration of the application `app_id`: this tenant's, or one from `foreign`, the
+    /// registrations held by other tenants.
+    pub fn registration<'a>(
+        &'a self,
+        foreign: &'a [Application],
+        app_id: &str,
+    ) -> Option<&'a Application> {
+        self.application_by_app_id(app_id).or_else(|| {
+            foreign
+                .iter()
+                .find(|application| application.app_id == app_id)
+        })
     }
 
     /// The app role values any of `principal_ids` holds on the resource `resource_id`.
@@ -214,6 +194,22 @@ impl Directory {
 }
 
 impl Directory {
+    /// The grant through which `user_id` has consented to the client (a service principal ID)
+    /// calling the resource: their own, or the tenant-wide one an administrator gave.
+    pub fn user_grant(
+        &self,
+        client_id: &str,
+        resource_id: &str,
+        user_id: &str,
+    ) -> Option<&OAuth2PermissionGrant> {
+        self.oauth2_permission_grants.values().find(|grant| {
+            grant.client_id == client_id
+                && grant.resource_id == resource_id
+                && (grant.consent_type == "AllPrincipals"
+                    || grant.principal_id.as_deref() == Some(user_id))
+        })
+    }
+
     /// The delegated permissions currently consented for a client acting for one user.
     ///
     /// Read at the moment a token is issued rather than remembered from the sign-in, so that
@@ -387,6 +383,24 @@ pub enum TokenVersion {
     V2,
 }
 
+impl TokenVersion {
+    /// The version an API asks for in `api.requestedAccessTokenVersion`.
+    ///
+    /// Microsoft: "The values of `null` and `1` result in v1.0 tokens, and the value of `2`
+    /// results in v2.0 tokens." An API with no registration has no setting, so it gets v1.0
+    /// tokens as well.
+    pub fn requested_by(registration: Option<&Application>) -> Self {
+        let requested = registration
+            .and_then(|application| application.extra.get("api"))
+            .and_then(|api| api.get("requestedAccessTokenVersion"))
+            .and_then(Value::as_u64);
+        match requested {
+            Some(2) => Self::V2,
+            _ => Self::V1,
+        }
+    }
+}
+
 /// Shared handle to the directory.
 pub type Store = Arc<RwLock<Directory>>;
 
@@ -399,7 +413,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use clap::Parser;
-    use time::Duration;
+    use time::{Duration, OffsetDateTime};
 
     fn directory_with_bootstrap() -> (Directory, Config) {
         let config = Config::parse_from(["entra-sim"]);
@@ -431,26 +445,22 @@ mod tests {
 
         assert!(
             directory
-                .matching_credential(
-                    &config.bootstrap_client_id,
-                    &config.bootstrap_client_secret,
-                    now
+                .application_by_app_id(&config.bootstrap_client_id)
+                .is_some_and(
+                    |application| application.accepts_secret(&config.bootstrap_client_secret, now)
                 )
-                .is_some()
         );
         assert!(
-            directory
-                .matching_credential(&config.bootstrap_client_id, "wrong-secret", now)
-                .is_none()
+            !directory
+                .application_by_app_id(&config.bootstrap_client_id)
+                .is_some_and(|application| application.accepts_secret("wrong-secret", now))
         );
         assert!(
-            directory
-                .matching_credential(
-                    "22222222-2222-2222-2222-222222222222",
-                    &config.bootstrap_client_secret,
-                    now
-                )
-                .is_none(),
+            !directory
+                .application_by_app_id("22222222-2222-2222-2222-222222222222")
+                .is_some_and(
+                    |application| application.accepts_secret(&config.bootstrap_client_secret, now)
+                ),
             "a secret must not authenticate a different client"
         );
     }
@@ -461,13 +471,10 @@ mod tests {
         let long_after = OffsetDateTime::now_utc() + Duration::days(365 * 50);
 
         assert!(
-            directory
-                .matching_credential(
-                    &config.bootstrap_client_id,
-                    &config.bootstrap_client_secret,
-                    long_after
-                )
-                .is_none(),
+            !directory
+                .application_by_app_id(&config.bootstrap_client_id)
+                .is_some_and(|application| application
+                    .accepts_secret(&config.bootstrap_client_secret, long_after)),
             "a credential past its endDateTime must not authenticate"
         );
     }

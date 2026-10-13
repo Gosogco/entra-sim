@@ -93,13 +93,17 @@ Read this part if Entra is new to you. Skip it if you know Entra well.
 A **tenant** is one directory. It holds users, groups and applications. Each
 tenant has a GUID and at least one domain name.
 
-The simulator serves one tenant. Its default GUID is
+The simulator serves one tenant by default. Its default GUID is
 `00000000-0000-0000-0000-000000000001`. Its default domain is
-`entra-sim.test`.
+`entra-sim.test`. `--additional-tenant ID=DOMAIN` adds more. Each has its own
+directory. A path can name a tenant by GUID or by domain.
 
 Entra accepts three alias names for a tenant: `common`, `organizations` and
-`consumers`. The simulator accepts all three. It always puts the real GUID in
-the tokens it makes.
+`consumers`. The simulator accepts all three. A sign-in through `common` or
+`organizations` offers the users of every tenant. The user signs in to their
+own tenant, and the token names that tenant. A multitenant application gets a
+service principal in the user's tenant on consent. A single-tenant application
+is refused there with `AADSTS50194`.
 
 ### Users and groups
 
@@ -1129,7 +1133,6 @@ The simulator does not support these:
 
 | Not supported | Effect |
 |---|---|
-| More than one tenant | One process serves one tenant |
 | Eventual consistency | A write is readable at once. Real Entra is slower. |
 | Conditional access, PIM, entitlement management | Not present |
 

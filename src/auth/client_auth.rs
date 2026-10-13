@@ -21,8 +21,7 @@ use x509_cert::Certificate;
 use x509_cert::der::{Decode, Encode};
 
 use crate::auth::oauth_error::{self, OAuthFailure};
-use crate::store::Directory;
-use crate::store::model::KeyCredential;
+use crate::store::model::{Application, KeyCredential};
 
 /// The only `client_assertion_type` Entra accepts.
 pub const JWT_BEARER_ASSERTION: &str = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
@@ -38,7 +37,7 @@ pub enum Presented {
 ///
 /// `audiences` are the token endpoint URLs the request may have been sent to.
 pub fn verify_certificate_assertion(
-    directory: &Directory,
+    application: &Application,
     client_id: &str,
     assertion: &str,
     audiences: &[String],
@@ -55,9 +54,6 @@ pub fn verify_certificate_assertion(
         )));
     }
 
-    let application = directory
-        .application_by_app_id(client_id)
-        .ok_or_else(|| oauth_error::unknown_client(client_id))?;
     let certificate = application
         .key_credentials
         .iter()
@@ -165,13 +161,9 @@ pub struct FederatedMatch {
 /// token". A mismatch gives AADSTS70021, "No matching federated identity record found for
 /// presented assertion."
 pub fn matching_federated_credential(
-    directory: &Directory,
-    client_id: &str,
+    application: &Application,
     claims: &Value,
 ) -> Result<FederatedMatch, OAuthFailure> {
-    let application = directory
-        .application_by_app_id(client_id)
-        .ok_or_else(|| oauth_error::unknown_client(client_id))?;
     let issuer = claims["iss"].as_str().unwrap_or_default();
     let subject = claims["sub"].as_str().unwrap_or_default();
     let audiences: Vec<&str> = match &claims["aud"] {

@@ -218,7 +218,7 @@ async fn verify(State(state): State<AppState>, Form(form): Form<VerifyForm>) -> 
     if let Some(refused) = unassigned(&state, &validated, &user_id).await {
         return refused;
     }
-    consent(&state, &validated, &user_id).await;
+    consent(&state, &validated, &user_id, false).await;
     state
         .sessions
         .lock()

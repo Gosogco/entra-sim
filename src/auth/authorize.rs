@@ -20,7 +20,9 @@ use crate::auth::scopes::{self, RequestedResource};
 use crate::auth::sessions::{AuthorizationCode, code_expiry};
 use crate::state::AppState;
 use crate::store::Directory;
-use crate::store::model::{MICROSOFT_GRAPH_APP_ID, OAuth2PermissionGrant};
+use crate::store::model::{
+    Application, MICROSOFT_GRAPH_APP_ID, OAuth2PermissionGrant, ServicePrincipal,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct AuthorizeRequest {
@@ -226,6 +228,18 @@ fn consent_satisfied(directory: &Directory, validated: &Validated, user_id: &str
             let Some(resource) = directory.service_principals.get(&requested.principal_id) else {
                 return true;
             };
+            // `.default` asks for consent once: until any exists, the page is needed.
+            if requested.wants_default()
+                && directory
+                    .user_grant(
+                        &validated.client_principal_id,
+                        &requested.principal_id,
+                        user_id,
+                    )
+                    .is_none()
+            {
+                return false;
+            }
             let consented =
                 directory.consented_scopes(&validated.client_id, user_id, &requested.principal_id);
             requested
@@ -424,6 +438,43 @@ async fn finish(
             }
         }
     };
+    // An API that names this client in knownClientApplications is provisioned along with it:
+    // Entra "automatically provisions service principals for both APIs at the same time".
+    {
+        let mut registrations = Vec::new();
+        for tenant in home.all_tenants() {
+            registrations.extend(tenant.store.read().await.applications.values().cloned());
+        }
+        let (_, named) = scopes::parse(request.scope.as_deref().unwrap_or_default());
+        let base_url = home.config.public_base_url();
+        let home_directory = home.store.read().await;
+        let known_apis: Vec<String> = named
+            .iter()
+            .filter_map(|entry| entry.resource.as_deref())
+            .filter_map(|name| home_directory.resource_for(name, &base_url))
+            .map(|principal| principal.app_id.clone())
+            .filter(|app_id| {
+                registrations.iter().any(|application| {
+                    application.app_id == *app_id
+                        && application
+                            .extra
+                            .get("api")
+                            .and_then(|block| block.get("knownClientApplications"))
+                            .and_then(serde_json::Value::as_array)
+                            .is_some_and(|known| {
+                                known.iter().any(|client| {
+                                    client.as_str() == Some(validated.client_id.as_str())
+                                })
+                            })
+                })
+            })
+            .collect();
+        drop(home_directory);
+        let mut directory = user_tenant.store.write().await;
+        for app_id in known_apis {
+            principal_for(&mut directory, &registrations, &app_id);
+        }
+    }
     let (resources, oidc) = {
         let directory = user_tenant.store.read().await;
         resolve_scope(
@@ -583,6 +634,24 @@ fn validate(
             ),
         )
     })?;
+    // Microsoft: "Clients can't combine static (.default) consent and dynamic consent in a single
+    // request. So scope=https://graph.microsoft.com/.default Mail.Read results in an error".
+    if resources.iter().any(RequestedResource::wants_default)
+        && resources
+            .iter()
+            .any(|resource| resource.named_scopes().next().is_some())
+    {
+        return Err(redirect_error(
+            redirect_uri,
+            response_mode,
+            request.state.as_deref(),
+            "invalid_scope",
+            &format!(
+                "AADSTS70011: The provided value for the input parameter 'scope' isn't valid. \
+                 '{scope}' combines a .default scope with other scopes."
+            ),
+        ));
+    }
 
     Ok(Validated {
         client_id: client_id.to_string(),
@@ -647,7 +716,13 @@ async fn issue_code(
     if let Some(refused) = unassigned(state, validated, user_id).await {
         return refused;
     }
-    consent(state, validated, user_id).await;
+    consent(
+        state,
+        validated,
+        user_id,
+        request.prompt.as_deref() == Some("consent"),
+    )
+    .await;
 
     let code = Uuid::new_v4().simple().to_string();
     {
@@ -821,10 +896,202 @@ pub(crate) async fn unassigned(
 /// Entra stores consent in the directory and derives the token's scopes from it, so the
 /// simulator does the same: a client cannot widen its own token by asking for more scopes than
 /// were consented, and an administrator revoking the grant narrows the next token.
-pub(crate) async fn consent(state: &AppState, validated: &Validated, user_id: &str) {
+pub(crate) async fn consent(
+    state: &AppState,
+    validated: &Validated,
+    user_id: &str,
+    force_default: bool,
+) {
+    // Static consent reads application registrations, which for a multitenant client or API live
+    // in another tenant's directory, so they are gathered before taking this tenant's lock.
+    let mut registrations = Vec::new();
+    for tenant in state.all_tenants() {
+        registrations.extend(tenant.store.read().await.applications.values().cloned());
+    }
+
     let mut directory = state.store.write().await;
     for requested in with_oidc_on_graph(&directory, validated) {
+        if requested.wants_default() {
+            consent_default(
+                &mut directory,
+                &registrations,
+                validated,
+                &requested,
+                user_id,
+                force_default,
+            );
+        }
         consent_to(&mut directory, validated, &requested, user_id);
+    }
+}
+
+/// Static consent through `{resource}/.default`.
+///
+/// Microsoft: ".default ... only triggers a consent prompt if consent wasn't granted for any
+/// delegated permission between the client and the resource, on behalf of the signed-in user",
+/// and that prompt is "for all required permissions configured on the client application
+/// registration, for all APIs in the list". `prompt=consent` shows it regardless.
+///
+/// An API that names the client in `api.knownClientApplications` takes part: Microsoft says
+/// consenting to the client then means "implicitly consenting to the web API", the prompt
+/// includes "whatever permissions are required by the middle-tier API", and Entra
+/// "automatically provisions service principals for both APIs at the same time".
+fn consent_default(
+    directory: &mut Directory,
+    registrations: &[Application],
+    validated: &Validated,
+    requested: &RequestedResource,
+    user_id: &str,
+    force: bool,
+) {
+    if !force
+        && directory
+            .user_grant(
+                &validated.client_principal_id,
+                &requested.principal_id,
+                user_id,
+            )
+            .is_some()
+    {
+        return;
+    }
+    let Some(client) = registrations
+        .iter()
+        .find(|application| application.app_id == validated.client_id)
+    else {
+        return;
+    };
+
+    for required in &client.required_resource_access {
+        let Some(resource_id) = principal_for(directory, registrations, &required.resource_app_id)
+        else {
+            continue;
+        };
+        let scopes = scope_values(directory, &resource_id, &required.resource_access);
+        record_grant(
+            directory,
+            &validated.client_principal_id,
+            &resource_id,
+            user_id,
+            &scopes,
+        );
+
+        // The API's own permissions, when it knows this client.
+        let Some(api) = registrations
+            .iter()
+            .find(|application| application.app_id == required.resource_app_id)
+        else {
+            continue;
+        };
+        let knows_client = api
+            .extra
+            .get("api")
+            .and_then(|block| block.get("knownClientApplications"))
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|known| {
+                known
+                    .iter()
+                    .any(|app_id| app_id.as_str() == Some(validated.client_id.as_str()))
+            });
+        if !knows_client {
+            continue;
+        }
+        for downstream in &api.required_resource_access {
+            let Some(downstream_id) =
+                principal_for(directory, registrations, &downstream.resource_app_id)
+            else {
+                continue;
+            };
+            let scopes = scope_values(directory, &downstream_id, &downstream.resource_access);
+            record_grant(directory, &resource_id, &downstream_id, user_id, &scopes);
+        }
+    }
+}
+
+/// The service principal of the application `app_id` in this directory, created from its
+/// registration when the application is registered elsewhere but has none here yet.
+fn principal_for(
+    directory: &mut Directory,
+    registrations: &[Application],
+    app_id: &str,
+) -> Option<String> {
+    if let Some(principal) = directory.service_principal_by_app_id(app_id) {
+        return Some(principal.id.clone());
+    }
+    let registration = registrations
+        .iter()
+        .find(|application| application.app_id == app_id)?;
+    let principal = ServicePrincipal::for_application(Uuid::new_v4().to_string(), registration);
+    let id = principal.id.clone();
+    info!(app_id, "created a service principal on consent");
+    directory.service_principals.insert(id.clone(), principal);
+    Some(id)
+}
+
+/// The values of the delegated permissions among `access`, as the resource publishes them.
+fn scope_values(
+    directory: &Directory,
+    resource_id: &str,
+    access: &[crate::store::model::ResourceAccess],
+) -> Vec<String> {
+    let Some(resource) = directory.service_principals.get(resource_id) else {
+        return Vec::new();
+    };
+    access
+        .iter()
+        .filter(|entry| entry.kind == "Scope")
+        .filter_map(|entry| {
+            resource
+                .oauth2_permission_scopes
+                .iter()
+                .find(|scope| scope.id == entry.id)
+                .and_then(|scope| scope.value.clone())
+        })
+        .collect()
+}
+
+/// Add `scopes` to the user's grant from `client_id` to `resource_id`, creating it if needed.
+fn record_grant(
+    directory: &mut Directory,
+    client_id: &str,
+    resource_id: &str,
+    user_id: &str,
+    scopes: &[String],
+) {
+    if scopes.is_empty() {
+        return;
+    }
+    let existing = directory
+        .user_grant(client_id, resource_id, user_id)
+        .map(|grant| grant.id.clone());
+    match existing.and_then(|id| directory.oauth2_permission_grants.get_mut(&id)) {
+        Some(grant) => {
+            let mut merged: Vec<String> =
+                grant.scope.split_whitespace().map(str::to_string).collect();
+            for scope in scopes {
+                if !merged.contains(scope) {
+                    merged.push(scope.clone());
+                }
+            }
+            merged.sort();
+            grant.scope = merged.join(" ");
+        }
+        None => {
+            let mut sorted = scopes.to_vec();
+            sorted.sort();
+            let grant = OAuth2PermissionGrant {
+                id: Uuid::new_v4().to_string(),
+                client_id: client_id.to_string(),
+                consent_type: "Principal".to_string(),
+                principal_id: Some(user_id.to_string()),
+                resource_id: resource_id.to_string(),
+                scope: sorted.join(" "),
+            };
+            info!(grant_id = %grant.id, scope = %grant.scope, "created OAuth2 permission grant on consent");
+            directory
+                .oauth2_permission_grants
+                .insert(grant.id.clone(), grant);
+        }
     }
 }
 
@@ -887,17 +1154,15 @@ fn consent_to(
         })
         .cloned();
 
-    // `/.default` asks for everything already consented and adds nothing new.
-    if requested.wants_default() {
-        return;
-    }
-
     let newly_requested: Vec<String> = requested
         .named_scopes()
         .filter(|scope| published.iter().any(|known| known == *scope))
         .cloned()
         .collect();
 
+    if newly_requested.is_empty() {
+        return;
+    }
     let mut scopes: Vec<String> = existing
         .as_ref()
         .map(|grant| grant.scope.split_whitespace().map(str::to_string).collect())

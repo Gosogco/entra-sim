@@ -7,7 +7,7 @@
 use serde_json::{Map, Value, json};
 
 use crate::store::Directory;
-use crate::store::model::Group;
+use crate::store::model::{Application, Group};
 
 /// Microsoft: "The number of groups emitted in a token is limited to ... 200 for JWT, including
 /// nested groups."
@@ -46,10 +46,11 @@ pub fn group_claims(
     tenant_id: &str,
     user_id: &str,
     app_id: &str,
+    registration: Option<&Application>,
     token_type: TokenType,
 ) -> GroupClaims {
     let mut result = GroupClaims::default();
-    let Some(application) = directory.application_by_app_id(app_id) else {
+    let Some(application) = registration else {
         return result;
     };
     // "It's not case-sensitive, so `none` also works."
@@ -153,10 +154,7 @@ pub fn group_claims(
 }
 
 /// The `additionalProperties` of the `groups` optional claim for this token type.
-fn groups_optional_claim(
-    application: &crate::store::model::Application,
-    token_type: TokenType,
-) -> Vec<String> {
+fn groups_optional_claim(application: &Application, token_type: TokenType) -> Vec<String> {
     application
         .extra
         .get("optionalClaims")
@@ -235,15 +233,14 @@ pub struct OptionalClaims {
     pub aud_use_guid: bool,
 }
 
-/// The optional claims the application `app_id` asks for in a token of `token_type` and
+/// The optional claims an application's registration asks for in a token of `token_type` and
 /// `version` for `user`, given the OpenID Connect scopes the sign-in asked for.
 ///
 /// Only claims the simulator holds data for are supported, and a claim with no value is left
 /// out: "Claims are present only if a value exists to fill it." The rules per claim are from
 /// Microsoft's optional claims reference and ID token claims reference.
 pub fn optional_claims(
-    directory: &Directory,
-    app_id: &str,
+    registration: Option<&Application>,
     token_type: TokenType,
     version: crate::store::TokenVersion,
     user: &crate::store::model::User,
@@ -252,8 +249,7 @@ pub fn optional_claims(
     use crate::store::TokenVersion;
 
     let mut result = OptionalClaims::default();
-    let requested: Vec<(String, Vec<String>)> = directory
-        .application_by_app_id(app_id)
+    let requested: Vec<(String, Vec<String>)> = registration
         .and_then(|application| application.extra.get("optionalClaims"))
         .and_then(|claims| claims.get(token_type.optional_claims_key()))
         .and_then(Value::as_array)

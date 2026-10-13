@@ -94,10 +94,23 @@ async fn create(
         })?
         .to_string();
 
+    // An application registered in another tenant can have a principal here when it is
+    // multitenant, which is how an administrator adds such an application to their tenant.
+    let foreign: Vec<_> = state
+        .foreign_registrations()
+        .await
+        .into_iter()
+        .filter(|application| {
+            matches!(
+                application.sign_in_audience.as_deref(),
+                Some("AzureADMultipleOrgs" | "AzureADandPersonalMicrosoftAccount")
+            )
+        })
+        .collect();
     let mut directory = state.store.write().await;
 
     let application = directory
-        .application_by_app_id(&app_id)
+        .registration(&foreign, &app_id)
         .ok_or_else(|| {
             // Entra refuses to create a principal for an application it does not know.
             GraphError::new(

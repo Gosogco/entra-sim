@@ -366,3 +366,114 @@ async fn an_api_missing_from_the_users_tenant_is_refused() {
     assert_eq!(response.status(), 400);
     assert!(response.text().await.unwrap().contains("AADSTS650052"));
 }
+
+#[tokio::test]
+async fn a_known_clients_api_is_provisioned_in_the_users_tenant() {
+    let sim = two_tenants().await;
+    let primary = sim.graph().await;
+    let client = primary
+        .register_public_client(
+            "Shared app",
+            json!({ "signInAudience": "AzureADMultipleOrgs" }),
+        )
+        .await;
+    let orders = primary
+        .register_api(
+            "Orders",
+            "api://orders",
+            &[],
+            &["Orders.Read"],
+            json!({
+                "signInAudience": "AzureADMultipleOrgs",
+                "api": {
+                    "requestedAccessTokenVersion": 2,
+                    "knownClientApplications": [client.app_id]
+                }
+            }),
+        )
+        .await;
+    let second = sim.graph_in(SECOND).await;
+    let carol = second
+        .create_user(&format!("carol@{SECOND_DOMAIN}"), "Carol Second")
+        .await;
+
+    // Entra "automatically provisions service principals for both APIs at the same time".
+    let response = choose(
+        &sim,
+        "common",
+        &client.app_id,
+        &carol,
+        "openid api://orders/.default",
+    )
+    .await;
+    assert_eq!(response.status(), 302, "{:?}", response.text().await);
+    let redeemed = redeem(&sim, "common", &client.app_id, &code_of(&response)).await;
+    assert_eq!(redeemed.status(), 200);
+    let tokens: Value = redeemed.json().await.unwrap();
+    let access = common::decode_claims(tokens["access_token"].as_str().unwrap());
+    assert_eq!(access["aud"], orders.app_id.as_str());
+    assert_eq!(access["tid"], SECOND);
+}
+
+#[tokio::test]
+async fn a_multitenant_daemon_gets_tokens_in_a_tenant_that_added_it() {
+    let sim = two_tenants().await;
+    let primary = sim.graph().await;
+    let daemon = primary
+        .register_client(
+            "SaaS daemon",
+            json!({ "signInAudience": "AzureADMultipleOrgs" }),
+        )
+        .await;
+    let request = |tenant: String| {
+        let sim = &sim;
+        let daemon = &daemon;
+        async move {
+            sim.client
+                .post(sim.url(&format!("/{tenant}/oauth2/v2.0/token")))
+                .form(&[
+                    ("grant_type", "client_credentials"),
+                    ("client_id", daemon.app_id.as_str()),
+                    ("client_secret", daemon.secret.as_str()),
+                    ("scope", "https://graph.microsoft.com/.default"),
+                ])
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+
+    // Unknown to the second tenant until an administrator adds it there.
+    let refused = request(SECOND.to_string()).await;
+    assert_eq!(refused.status(), 401);
+    let body: Value = refused.json().await.unwrap();
+    assert_eq!(body["error_codes"][0], 700016);
+
+    let second = sim.graph_in(SECOND).await;
+    second
+        .post_created(
+            "/v1.0/servicePrincipals",
+            &json!({ "appId": daemon.app_id }),
+        )
+        .await;
+    let allowed = request(SECOND.to_string()).await;
+    assert_eq!(allowed.status(), 200);
+    let body: Value = allowed.json().await.unwrap();
+    assert_eq!(
+        common::decode_claims(body["access_token"].as_str().unwrap())["tid"],
+        SECOND
+    );
+}
+
+#[tokio::test]
+async fn a_single_tenant_app_cannot_be_added_to_another_tenant() {
+    let sim = two_tenants().await;
+    let primary = sim.graph().await;
+    let mine = primary.register_client("Mine only", json!({})).await;
+
+    let second = sim.graph_in(SECOND).await;
+    let response = second
+        .post("/v1.0/servicePrincipals", &json!({ "appId": mine.app_id }))
+        .await;
+    assert_eq!(response.status(), 400);
+}

@@ -150,6 +150,16 @@ Both are unset against a real tenant. Nothing else changes.
 a Playwright test that drives the sign-in in a real browser. Its README covers `mkcert`, which the
 browser needs in order to trust the generated certificate.
 
+## More than one tenant
+
+`--additional-tenant TENANT_ID=DOMAIN` (`ENTRA_SIM_ADDITIONAL_TENANTS`, comma-separated) serves
+more tenants beside the primary one, each with its own directory holding Microsoft Graph and the
+bootstrap client. The identity endpoints take the tenant from the path, by ID or domain, and
+Graph from the token's `tid`. Through `common` or `organizations` the sign-in page offers every
+tenant's users; a user signs in to their own tenant, and a multitenant application gets a
+service principal there on consent, as in Entra. The control endpoints under `/__sim__` act on
+the primary tenant, except `reset`, which resets them all.
+
 ## Pointing application code at it
 
 For a client using the Azure SDKs, set `AZURE_AUTHORITY_HOST` to the simulator. Graph tokens are
@@ -216,7 +226,6 @@ breaks the simulator surfaces as a failing check rather than a confusing provide
 
 ## What it does not do
 
-- One tenant per process. `common`, `organizations` and `consumers` resolve to it.
 - Writes are immediately readable; there is no eventual consistency to trip over.
 - Conditional access, entitlement management, administrative units, PIM and synchronization jobs
   are all out of scope.
