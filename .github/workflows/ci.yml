@@ -222,7 +222,7 @@ jobs:
       # The real azuread provider against the simulator, configured only by environment: the
       # same configuration would run against a real tenant with ARM_METADATA_HOSTNAME removed.
       - name: Apply, verify the plan is empty, then destroy
-        working-directory: terraform/accept
+        working-directory: tests/terraform
         env:
           ARM_METADATA_HOSTNAME: localhost:8443
           ARM_TENANT_ID: 00000000-0000-0000-0000-000000000001

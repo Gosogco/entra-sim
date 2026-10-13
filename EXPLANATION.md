@@ -579,7 +579,7 @@ write tests before you set up consent.
 
 ### Scenario E. Terraform deploys an app registration
 
-`terraform/accept/` holds a working example. It makes sixteen resources:
+`tests/terraform/` holds a working example. It makes sixteen resources:
 
 - Two users.
 - A group.

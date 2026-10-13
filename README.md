@@ -120,7 +120,7 @@ export ARM_CLIENT_SECRET=entra-sim-bootstrap-secret
 terraform apply
 ```
 
-`terraform/accept/` holds a worked example that creates two users, a group, a membership, an app
+`tests/terraform/` holds a worked example that creates two users, a group, a membership, an app
 registration with API permissions, a service principal, a secret, a certificate, an app role
 assignment, a report-only conditional access policy, a PIM eligibility, a directory role, and an
 administrative unit with two members and a scoped role member. CI applies it, checks that the
