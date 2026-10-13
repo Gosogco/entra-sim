@@ -90,30 +90,33 @@ async fn jwks_key_is_reachable_from_discovery() {
 }
 
 #[tokio::test]
-async fn discovery_answers_on_both_paths() {
+async fn the_path_without_v2_serves_the_v1_document() {
     let sim = Sim::start().await;
 
-    // MSAL in AAD mode asks for the /v2.0/ path. MSAL in OIDC mode, and generic OIDC
-    // libraries, ask without it. Both must find the same document.
-    let with_version = sim
-        .get_json(&format!(
-            "/{}/v2.0/.well-known/openid-configuration",
-            sim.tenant_id
-        ))
+    // Entra serves its v1.0 document there, which an API validating v1.0 tokens reads.
+    let v1 = sim
+        .get_json("/common/.well-known/openid-configuration")
         .await;
-    let without_version = sim
-        .get_json(&format!(
-            "/{}/.well-known/openid-configuration",
-            sim.tenant_id
-        ))
-        .await;
-
-    assert_eq!(with_version, without_version);
-    // The issuer still names /v2.0, because that is what the tokens carry.
-    assert!(
-        without_version["issuer"]
-            .as_str()
-            .unwrap()
-            .ends_with("/v2.0")
+    assert_eq!(
+        v1["issuer"],
+        format!("https://sts.windows.net/{}/", sim.tenant_id).as_str()
     );
+    let jwks_uri = v1["jwks_uri"].as_str().unwrap();
+    assert_eq!(
+        jwks_uri,
+        format!("{}/{}/discovery/keys", sim.public_base_url, sim.tenant_id)
+    );
+    // The v1.0 protocol endpoints are not implemented, so they are not advertised.
+    assert!(v1.get("authorization_endpoint").is_none(), "{v1}");
+    assert!(v1.get("token_endpoint").is_none(), "{v1}");
+
+    // Both key paths publish the same key, under `kid` and `x5t` alike.
+    let v1_keys = sim
+        .get_json(jwks_uri.strip_prefix(&sim.public_base_url).unwrap())
+        .await;
+    let v2_keys = sim
+        .get_json(&format!("/{}/discovery/v2.0/keys", sim.tenant_id))
+        .await;
+    assert_eq!(v1_keys, v2_keys);
+    assert_eq!(v1_keys["keys"][0]["x5t"], v1_keys["keys"][0]["kid"]);
 }

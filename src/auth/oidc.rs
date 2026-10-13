@@ -44,14 +44,16 @@ pub fn router() -> Router<AppState> {
             "/{tenant}/v2.0/.well-known/openid-configuration",
             get(configuration),
         )
-        // MSAL in OIDC mode, and most generic OIDC libraries, ask without it. Serving both
-        // costs one route and removes a whole class of "the client cannot find the metadata"
-        // failure, which is awkward to diagnose from the client side.
+        // Without `/v2.0` Entra serves its v1.0 document, which an API validating v1.0 tokens
+        // reads: Microsoft says such an API "needs to read the OpenID Connect metadata document
+        // from the v1.0 endpoint".
         .route(
             "/{tenant}/.well-known/openid-configuration",
-            get(configuration),
+            get(v1_configuration),
         )
         .route("/{tenant}/discovery/v2.0/keys", get(keys))
+        // The same key serves both versions.
+        .route("/{tenant}/discovery/keys", get(keys))
 }
 
 /// Build the discovery document for `tenant` as advertised at `base_url`.
@@ -100,6 +102,33 @@ pub fn document(base_url: &str, tenant: &str) -> OpenIdConfiguration {
     }
 }
 
+/// The v1.0 discovery document, for APIs that validate v1.0 access tokens.
+///
+/// Shaped after `https://login.microsoftonline.com/common/.well-known/openid-configuration`, but
+/// limited to the issuer and the keys. Entra's document also names the v1.0 protocol endpoints
+/// (`/oauth2/authorize`, `/oauth2/token`), which the simulator does not implement, and
+/// advertising them would send a client to endpoints that do not exist.
+#[derive(Debug, Serialize)]
+pub struct V1OpenIdConfiguration {
+    pub issuer: String,
+    pub jwks_uri: String,
+    pub subject_types_supported: Vec<&'static str>,
+    pub id_token_signing_alg_values_supported: Vec<&'static str>,
+    pub tenant_region_scope: Option<String>,
+    pub cloud_instance_name: String,
+}
+
+pub fn v1_document(base_url: &str, tenant: &str) -> V1OpenIdConfiguration {
+    V1OpenIdConfiguration {
+        issuer: crate::auth::token::v1_issuer(tenant),
+        jwks_uri: format!("{base_url}/{tenant}/discovery/keys"),
+        subject_types_supported: vec!["pairwise"],
+        id_token_signing_alg_values_supported: vec!["RS256"],
+        tenant_region_scope: None,
+        cloud_instance_name: base_url.trim_start_matches("https://").to_string(),
+    }
+}
+
 /// Discovery responses are cacheable but short-lived, so a client picks up a new signing key
 /// reasonably quickly after a restart.
 const CACHE_CONTROL: (header::HeaderName, &str) =
@@ -116,6 +145,20 @@ async fn configuration(
     (
         [CACHE_CONTROL],
         Json(document(&state.config.public_base_url(), &tenant)),
+    )
+}
+
+async fn v1_configuration(
+    State(state): State<AppState>,
+    Path(tenant): Path<String>,
+) -> (
+    [(header::HeaderName, &'static str); 1],
+    Json<V1OpenIdConfiguration>,
+) {
+    let tenant = state.config.resolve_tenant(&tenant);
+    (
+        [CACHE_CONTROL],
+        Json(v1_document(&state.config.public_base_url(), &tenant)),
     )
 }
 

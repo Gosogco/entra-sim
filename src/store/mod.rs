@@ -114,6 +114,23 @@ impl Directory {
         })
     }
 
+    /// The access token version the API `app_id` asks for in `api.requestedAccessTokenVersion`.
+    ///
+    /// Microsoft: "The values of `null` and `1` result in v1.0 tokens, and the value of `2`
+    /// results in v2.0 tokens." An API with no registration in this tenant has no setting, so
+    /// it gets v1.0 tokens as well.
+    pub fn requested_access_token_version(&self, app_id: &str) -> TokenVersion {
+        let requested = self
+            .application_by_app_id(app_id)
+            .and_then(|application| application.extra.get("api"))
+            .and_then(|api| api.get("requestedAccessTokenVersion"))
+            .and_then(Value::as_u64);
+        match requested {
+            Some(2) => TokenVersion::V2,
+            _ => TokenVersion::V1,
+        }
+    }
+
     /// The app role values any of `principal_ids` holds on the resource `resource_id`.
     ///
     /// For an app-only token that is the client's own principal. For a user token it is the
@@ -276,6 +293,13 @@ fn annotate<T: serde::Serialize>(kind: ObjectKind, object: &T) -> Value {
         );
     }
     value
+}
+
+/// The two access token formats Entra issues for a registered API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenVersion {
+    V1,
+    V2,
 }
 
 /// Shared handle to the directory.

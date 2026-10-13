@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::auth::keys::SigningKey;
+use crate::store::TokenVersion;
 
 /// How the client proved its identity. Entra reports `1` for a shared secret and `2` for a
 /// certificate, and some policies key off the distinction.
@@ -195,6 +196,8 @@ pub enum ApiTokenSubject<'a> {
         user_id: &'a str,
         user_principal_name: &'a str,
         display_name: &'a str,
+        given_name: Option<&'a str>,
+        family_name: Option<&'a str>,
         /// Space-separated delegated permissions on the API.
         scope: &'a str,
     },
@@ -203,11 +206,14 @@ pub enum ApiTokenSubject<'a> {
 /// Everything needed to mint an access token for an API registered in the directory, as
 /// opposed to Microsoft Graph.
 pub struct ApiTokenRequest<'a> {
-    /// The API's `appId`. Microsoft: "In v2.0 tokens, this value is always the client ID of the
-    /// API."
+    pub version: TokenVersion,
+    /// The API's `appId` for a v2.0 token. Microsoft: "In v2.0 tokens, this value is always the
+    /// client ID of the API. In v1.0 tokens, it can be the client ID or the resource URI used in
+    /// the request."
     pub audience: &'a str,
-    pub issuer: &'a str,
     pub tenant_id: &'a str,
+    /// The simulator's base URL, which a v2.0 issuer is built on.
+    pub base_url: &'a str,
     pub client_id: &'a str,
     pub client_auth: ClientAuth,
     pub subject: ApiTokenSubject<'a>,
@@ -216,11 +222,19 @@ pub struct ApiTokenRequest<'a> {
     pub ttl_seconds: u64,
 }
 
-/// Mint and sign a v2.0 access token for a registered API.
+/// The issuer of a v1.0 token. Microsoft's v1.0 discovery document names
+/// `https://sts.windows.net/{tenantid}/`, and the simulator's names the same, because an API
+/// compares the two strings and never contacts the host.
+pub fn v1_issuer(tenant_id: &str) -> String {
+    format!("https://sts.windows.net/{tenant_id}/")
+}
+
+/// Mint and sign an access token for a registered API, in the version the API asked for.
 ///
-/// The claims follow Microsoft's access token claims reference for v2.0 tokens: `azp` and
-/// `azpacr` name the client, `idtyp` is `app` only on an app-only token, and a user token
-/// carries `scp`, `name` and `preferred_username` and, when the user holds roles on the API,
+/// The claims follow Microsoft's access token claims reference. A v2.0 token names the client
+/// with `azp` and `azpacr`; a v1.0 token with `appid` and `appidacr`, and adds the v1.0 basic
+/// claims such as `upn`, `unique_name`, `given_name` and `family_name`. `idtyp` is `app` only
+/// on an app-only token. A user token carries `scp` and, when the user holds roles on the API,
 /// `roles`.
 pub fn issue_api_token(
     key: &SigningKey,
@@ -229,20 +243,33 @@ pub fn issue_api_token(
 ) -> Result<(String, u64)> {
     use serde_json::{Value, json};
 
+    let v1 = request.version == TokenVersion::V1;
     let issued_at = now.unix_timestamp();
     let mut claims = serde_json::Map::new();
     let mut set = |name: &str, value: Value| {
         claims.insert(name.to_string(), value);
     };
     set("aud", json!(request.audience));
-    set("iss", json!(request.issuer));
+    if v1 {
+        set("iss", json!(v1_issuer(request.tenant_id)));
+    } else {
+        set(
+            "iss",
+            json!(format!("{}/{}/v2.0", request.base_url, request.tenant_id)),
+        );
+    }
     set("iat", json!(issued_at));
     set("nbf", json!(issued_at));
     set("exp", json!(issued_at + request.ttl_seconds as i64));
-    set("azp", json!(request.client_id));
-    set("azpacr", json!(request.client_auth.code()));
+    if v1 {
+        set("appid", json!(request.client_id));
+        set("appidacr", json!(request.client_auth.code()));
+    } else {
+        set("azp", json!(request.client_id));
+        set("azpacr", json!(request.client_auth.code()));
+    }
     set("tid", json!(request.tenant_id));
-    set("ver", json!("2.0"));
+    set("ver", json!(if v1 { "1.0" } else { "2.0" }));
 
     match request.subject {
         ApiTokenSubject::App { principal_id } => {
@@ -254,12 +281,27 @@ pub fn issue_api_token(
             user_id,
             user_principal_name,
             display_name,
+            given_name,
+            family_name,
             scope,
         } => {
             set("oid", json!(user_id));
             set("sub", json!(user_id));
             set("name", json!(display_name));
-            set("preferred_username", json!(user_principal_name));
+            if v1 {
+                // Microsoft lists these as v1.0 claims that v2.0 tokens leave out by default.
+                set("upn", json!(user_principal_name));
+                set("unique_name", json!(user_principal_name));
+                set("amr", json!(["pwd"]));
+                if let Some(given_name) = given_name {
+                    set("given_name", json!(given_name));
+                }
+                if let Some(family_name) = family_name {
+                    set("family_name", json!(family_name));
+                }
+            } else {
+                set("preferred_username", json!(user_principal_name));
+            }
             // Microsoft: `scp` is "Only included for user tokens".
             set("scp", json!(scope));
         }
@@ -270,6 +312,11 @@ pub fn issue_api_token(
 
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some(key.kid.clone());
+    if v1 {
+        // Microsoft: `x5t` "Functions the same (in use and value) as `kid`" and is "emitted only
+        // in v1.0 access tokens".
+        header.x5t = Some(key.kid.clone());
+    }
     let token = encode(&header, &claims, &key.encoding).context("signing the access token")?;
     Ok((token, request.ttl_seconds))
 }

@@ -77,6 +77,7 @@ impl SigningKey {
                 use_: "sig",
                 alg: "RS256",
                 kid: self.kid.clone(),
+                x5t: self.kid.clone(),
                 n: self.modulus.clone(),
                 e: self.exponent.clone(),
             }],
@@ -102,6 +103,9 @@ pub struct Jwk {
     pub use_: &'static str,
     pub alg: &'static str,
     pub kid: String,
+    /// Entra publishes `x5t` with the same value as `kid`, and v1.0 tokens name their key with
+    /// both, so a client matching on either finds it.
+    pub x5t: String,
     pub n: String,
     pub e: String,
 }

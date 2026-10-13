@@ -1424,6 +1424,60 @@ async fn a_role_on_a_group_that_is_not_a_security_group_does_not_reach_the_user(
 }
 
 #[tokio::test]
+async fn a_v1_user_token_carries_the_v1_user_claims() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let orders = graph
+        .register_api("Orders", "api://orders", &[], &["Orders.Read"], json!({}))
+        .await;
+    let client = graph
+        .register_client(
+            "Orders website",
+            json!({ "publicClient": { "redirectUris": [REDIRECT_URI] } }),
+        )
+        .await;
+    let user = graph
+        .post_created(
+            "/v1.0/users",
+            &json!({
+                "displayName": "Carol Example",
+                "givenName": "Carol",
+                "surname": "Example",
+                "userPrincipalName": "carol@sim.test",
+                "mailNickname": "carol",
+                "accountEnabled": true,
+                "passwordProfile": { "password": "Sup3rSecret!" }
+            }),
+        )
+        .await;
+    let carol = Fixture {
+        client_id: client.app_id,
+        user_id: user["id"].as_str().unwrap().to_string(),
+        user_principal_name: "carol@sim.test".to_string(),
+    };
+
+    let tokens = complete_flow(
+        &sim,
+        &carol,
+        "openid api://orders/Orders.Read",
+        Some(VERIFIER),
+    )
+    .await;
+    let claims = common::decode_claims(tokens["access_token"].as_str().unwrap());
+    assert_eq!(claims["ver"], "1.0");
+    assert_eq!(claims["aud"], "api://orders");
+    assert_eq!(claims["appid"], carol.client_id.as_str());
+    assert_eq!(claims["appidacr"], "0");
+    assert_eq!(claims["upn"], "carol@sim.test");
+    assert_eq!(claims["unique_name"], "carol@sim.test");
+    assert_eq!(claims["given_name"], "Carol");
+    assert_eq!(claims["family_name"], "Example");
+    assert_eq!(claims["scp"], "Orders.Read");
+    assert!(claims.get("preferred_username").is_none(), "{claims}");
+    let _ = orders;
+}
+
+#[tokio::test]
 async fn a_refresh_naming_a_revoked_permission_is_narrowed_not_refused() {
     let sim = Sim::start().await;
     let graph = sim.graph().await;

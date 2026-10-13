@@ -18,6 +18,7 @@ use crate::auth::token::{
     issue_app_token, issue_user_token,
 };
 use crate::state::AppState;
+use crate::store::TokenVersion;
 use crate::store::model::MICROSOFT_GRAPH_APP_ID;
 
 /// A token request. Fields are shared across grant types, so all are optional here and the
@@ -140,12 +141,15 @@ async fn client_credentials(
         );
         (advertised.clone(), signed)
     } else {
+        let version = directory.requested_access_token_version(&resource.app_id);
+        let audience = api_audience(version, &resource.app_id, &resource_name);
         let signed = issue_api_token(
             &state.signing_key,
             ApiTokenRequest {
-                audience: &resource.app_id,
-                issuer: &issuer,
+                version,
+                audience: &audience,
                 tenant_id: tenant,
+                base_url: &advertised,
                 client_id: &client_id,
                 client_auth: ClientAuth::Secret,
                 subject: ApiTokenSubject::App {
@@ -156,7 +160,7 @@ async fn client_credentials(
             },
             now,
         );
-        (resource.app_id.clone(), signed)
+        (audience, signed)
     };
     let (access_token, expires_in) =
         signed.map_err(|error| oauth_error::server_error(error.to_string()))?;
@@ -489,7 +493,7 @@ async fn issue_user_tokens(
     let issuer = format!("{advertised}/{tenant}/v2.0");
 
     let resource = &target.resource;
-    let (user_principal_name, display_name, roles) = {
+    let (user_principal_name, display_name, given_name, family_name, roles, version) = {
         let directory = state.store.read().await;
         let user = directory.users.get(user_id).ok_or_else(|| {
             oauth_error::no_grant("AADSTS50034: The user account does not exist in the directory.")
@@ -510,7 +514,10 @@ async fn issue_user_tokens(
         (
             user.user_principal_name.clone(),
             user.display_name.clone(),
+            user.given_name.clone(),
+            user.surname.clone(),
             roles,
+            directory.requested_access_token_version(&resource.app_id),
         )
     };
 
@@ -534,18 +541,26 @@ async fn issue_user_tokens(
         );
         (advertised.clone(), signed)
     } else {
+        let audience = api_audience(
+            version,
+            &resource.app_id,
+            resource.requested_as.as_deref().unwrap_or(&resource.app_id),
+        );
         let signed = issue_api_token(
             &state.signing_key,
             ApiTokenRequest {
-                audience: &resource.app_id,
-                issuer: &issuer,
+                version,
+                audience: &audience,
                 tenant_id: tenant,
+                base_url: &advertised,
                 client_id,
                 client_auth,
                 subject: ApiTokenSubject::User {
                     user_id,
                     user_principal_name: &user_principal_name,
                     display_name: &display_name,
+                    given_name: given_name.as_deref(),
+                    family_name: family_name.as_deref(),
                     scope: &scope,
                 },
                 roles: roles.clone(),
@@ -553,7 +568,7 @@ async fn issue_user_tokens(
             },
             now,
         );
-        (resource.app_id.clone(), signed)
+        (audience, signed)
     };
     let (access_token, expires_in) =
         signed.map_err(|error| oauth_error::server_error(error.to_string()))?;
@@ -640,6 +655,17 @@ async fn issue_user_tokens(
         id_token: Some(id_token),
         refresh_token: refresh,
     }))
+}
+
+/// The `aud` of a token for a registered API.
+///
+/// Microsoft: "In v2.0 tokens, this value is always the client ID of the API. In v1.0 tokens,
+/// it can be the client ID or the resource URI used in the request."
+fn api_audience(version: TokenVersion, app_id: &str, requested_as: &str) -> String {
+    match version {
+        TokenVersion::V2 => app_id.to_string(),
+        TokenVersion::V1 => requested_as.to_string(),
+    }
 }
 
 /// Verify a client secret when one is presented, and report how the client authenticated.

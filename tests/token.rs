@@ -373,3 +373,130 @@ async fn roles_on_graph_do_not_leak_into_a_token_for_another_api() {
     assert_eq!(claims["aud"], orders.app_id.as_str());
     assert!(claims.get("roles").is_none(), "{claims}");
 }
+
+/// Orders with no token version set, which is the default in Entra and in the azuread provider.
+async fn orders_v1_and_billing(
+    sim: &Sim,
+    extra: serde_json::Value,
+) -> (common::Api, common::Client) {
+    let graph = sim.graph().await;
+    let orders = graph
+        .register_api("Orders", "api://orders", &["Admin"], &[], extra)
+        .await;
+    let billing = graph
+        .register_client("Billing job", serde_json::json!({}))
+        .await;
+    graph
+        .assign_role(&billing.principal_id, &orders, "Admin")
+        .await;
+    (orders, billing)
+}
+
+/// Validate a v1.0 token the way an API does: against the v1.0 discovery document's issuer and
+/// keys.
+async fn validated_as_v1(sim: &Sim, token: &str, audience: &str) -> Value {
+    let discovery = sim
+        .get_json(&format!(
+            "/{}/.well-known/openid-configuration",
+            sim.tenant_id
+        ))
+        .await;
+    let jwks = sim
+        .get_json(
+            discovery["jwks_uri"]
+                .as_str()
+                .unwrap()
+                .strip_prefix(&sim.public_base_url)
+                .unwrap(),
+        )
+        .await;
+    let header = decode_header(token).unwrap();
+    assert_eq!(
+        header.x5t, header.kid,
+        "a v1.0 token names its key with x5t too"
+    );
+    let key = &jwks["keys"][0];
+    let decoding =
+        DecodingKey::from_rsa_components(key["n"].as_str().unwrap(), key["e"].as_str().unwrap())
+            .unwrap();
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.set_audience(&[audience]);
+    validation.set_issuer(&[discovery["issuer"].as_str().unwrap()]);
+    decode::<Value>(token, &decoding, &validation)
+        .expect("the token should validate against the v1.0 document")
+        .claims
+}
+
+#[tokio::test]
+async fn an_api_without_a_token_version_gets_a_v1_token() {
+    let sim = Sim::start().await;
+    let (_, billing) = orders_v1_and_billing(&sim, serde_json::json!({})).await;
+
+    let body: Value = sim
+        .app_token(&billing, "api://orders/.default")
+        .await
+        .json()
+        .await
+        .unwrap();
+    // Microsoft: in v1.0 tokens `aud` "can be the client ID or the resource URI used in the
+    // request".
+    let claims =
+        validated_as_v1(&sim, body["access_token"].as_str().unwrap(), "api://orders").await;
+    assert_eq!(claims["ver"], "1.0");
+    assert_eq!(
+        claims["iss"],
+        format!("https://sts.windows.net/{}/", sim.tenant_id).as_str()
+    );
+    assert_eq!(claims["appid"], billing.app_id.as_str());
+    assert_eq!(claims["appidacr"], "1");
+    assert!(claims.get("azp").is_none(), "{claims}");
+    assert_eq!(claims["roles"], serde_json::json!(["Admin"]));
+    assert_eq!(claims["idtyp"], "app");
+}
+
+#[tokio::test]
+async fn token_version_one_gives_a_v1_token_addressed_as_requested() {
+    let sim = Sim::start().await;
+    let (orders, billing) = orders_v1_and_billing(
+        &sim,
+        serde_json::json!({ "api": { "requestedAccessTokenVersion": 1 } }),
+    )
+    .await;
+
+    let body: Value = sim
+        .app_token(&billing, &format!("{}/.default", orders.app_id))
+        .await
+        .json()
+        .await
+        .unwrap();
+    let claims =
+        validated_as_v1(&sim, body["access_token"].as_str().unwrap(), &orders.app_id).await;
+    assert_eq!(claims["ver"], "1.0");
+    assert_eq!(claims["aud"], orders.app_id.as_str());
+}
+
+#[tokio::test]
+async fn token_version_two_gives_a_v2_token() {
+    let sim = Sim::start().await;
+    let (orders, billing) = orders_v1_and_billing(
+        &sim,
+        serde_json::json!({ "api": { "requestedAccessTokenVersion": 2 } }),
+    )
+    .await;
+
+    let body: Value = sim
+        .app_token(&billing, "api://orders/.default")
+        .await
+        .json()
+        .await
+        .unwrap();
+    let claims =
+        validated_for_api(&sim, body["access_token"].as_str().unwrap(), &orders.app_id).await;
+    assert_eq!(claims["ver"], "2.0");
+    assert!(
+        decode_header(body["access_token"].as_str().unwrap())
+            .unwrap()
+            .x5t
+            .is_none()
+    );
+}
