@@ -126,6 +126,8 @@ pub struct UserTokenRequest<'a> {
     pub display_name: &'a str,
     /// Space-separated delegated permissions the user consented to.
     pub scope: &'a str,
+    /// App roles assigned to the user on the resource.
+    pub roles: Vec<String>,
     pub ttl_seconds: u64,
 }
 
@@ -151,9 +153,9 @@ pub fn issue_user_token(
         sub: request.user_id.to_string(),
         tid: request.tenant_id.to_string(),
         ver: "2.0".to_string(),
-        // A delegated token carries scopes, never roles; the two are distinct permission sets
-        // and a client must not be able to satisfy an app-only requirement by signing a user in.
-        roles: Vec::new(),
+        // The user's own roles on the resource. Graph judges a delegated token on `scp` alone
+        // (`permissions::satisfied`), so a role here never satisfies an app-only requirement.
+        roles: request.roles,
         scp: Some(request.scope.to_string()),
         app_displayname: None,
         upn: Some(request.user_principal_name.to_string()),

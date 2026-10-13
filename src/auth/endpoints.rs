@@ -481,15 +481,32 @@ async fn issue_user_tokens(
     let advertised = state.config.public_base_url();
     let issuer = format!("{advertised}/{tenant}/v2.0");
 
-    let (user_principal_name, display_name) = {
+    let resource = &target.resource;
+    let (user_principal_name, display_name, roles) = {
         let directory = state.store.read().await;
         let user = directory.users.get(user_id).ok_or_else(|| {
             oauth_error::no_grant("AADSTS50034: The user account does not exist in the directory.")
         })?;
-        (user.user_principal_name.clone(), user.display_name.clone())
+        // Microsoft: "For user tokens, this set of values contains the assigned roles of the user
+        // on the target application." Roles assigned to a group reach its direct members only:
+        // Microsoft supports group-based assignment for security groups, and "Nested group
+        // memberships aren't supported".
+        let mut holders = vec![user_id.to_string()];
+        holders.extend(
+            directory
+                .groups_containing(user_id)
+                .into_iter()
+                .filter(|group| group.security_enabled)
+                .map(|group| group.id.clone()),
+        );
+        let roles = directory.granted_role_values(&holders, &resource.principal_id);
+        (
+            user.user_principal_name.clone(),
+            user.display_name.clone(),
+            roles,
+        )
     };
 
-    let resource = &target.resource;
     let scope = target.granted.join(" ");
     let (audience, signed) = if resource.is_graph() {
         let signed = issue_user_token(
@@ -503,6 +520,7 @@ async fn issue_user_tokens(
                 user_principal_name: &user_principal_name,
                 display_name: &display_name,
                 scope: &scope,
+                roles: roles.clone(),
                 ttl_seconds: state.config.token_ttl_seconds,
             },
             now,
@@ -523,7 +541,7 @@ async fn issue_user_tokens(
                     display_name: &display_name,
                     scope: &scope,
                 },
-                roles: Vec::new(),
+                roles: roles.clone(),
                 ttl_seconds: state.config.token_ttl_seconds,
             },
             now,
@@ -563,7 +581,10 @@ async fn issue_user_tokens(
         subject_name: user_principal_name.clone(),
         audience: audience.to_string(),
         scopes,
-        roles: Vec::new(),
+        roles: match kind {
+            TokenKind::Access => roles.clone(),
+            _ => Vec::new(),
+        },
         issued_at: now,
         expires_at,
     };

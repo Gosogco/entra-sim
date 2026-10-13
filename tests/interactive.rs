@@ -1333,3 +1333,92 @@ async fn an_api_scope_the_api_does_not_publish_is_not_granted() {
     let claims = common::decode_claims(tokens["access_token"].as_str().unwrap());
     assert_eq!(claims["scp"], "", "{claims}");
 }
+
+#[tokio::test]
+async fn a_user_token_carries_the_users_roles_on_the_api() {
+    let sim = Sim::start().await;
+    let (orders, bob) = orders_fixture(&sim).await;
+    let graph = sim.graph().await;
+
+    // Writer directly, Reader through a group bob is a direct member of.
+    graph.assign_role(&bob.user_id, &orders, "Writer").await;
+    let readers = graph.create_group("Order readers", &[&bob.user_id]).await;
+    graph.assign_role(&readers, &orders, "Reader").await;
+
+    let tokens = complete_flow(
+        &sim,
+        &bob,
+        "openid api://orders/Orders.Read",
+        Some(VERIFIER),
+    )
+    .await;
+    let claims = common::decode_claims(tokens["access_token"].as_str().unwrap());
+    assert_eq!(claims["roles"], json!(["Reader", "Writer"]));
+
+    // The roles belong to Orders, so a Graph token for the same user carries none.
+    let tokens = complete_flow(&sim, &bob, "openid User.Read", Some(VERIFIER)).await;
+    let claims = common::decode_claims(tokens["access_token"].as_str().unwrap());
+    assert!(claims.get("roles").is_none(), "{claims}");
+}
+
+#[tokio::test]
+async fn a_role_on_a_nested_group_does_not_reach_the_user() {
+    let sim = Sim::start().await;
+    let (orders, bob) = orders_fixture(&sim).await;
+    let graph = sim.graph().await;
+
+    // Microsoft does not support nested group membership for group-based app role assignment.
+    let inner = graph.create_group("Inner", &[&bob.user_id]).await;
+    let outer = graph.create_group("Outer", &[&inner]).await;
+    graph.assign_role(&outer, &orders, "Writer").await;
+
+    let tokens = complete_flow(
+        &sim,
+        &bob,
+        "openid api://orders/Orders.Read",
+        Some(VERIFIER),
+    )
+    .await;
+    let claims = common::decode_claims(tokens["access_token"].as_str().unwrap());
+    assert!(claims.get("roles").is_none(), "{claims}");
+}
+
+#[tokio::test]
+async fn a_role_on_a_group_that_is_not_a_security_group_does_not_reach_the_user() {
+    let sim = Sim::start().await;
+    let (orders, bob) = orders_fixture(&sim).await;
+    let graph = sim.graph().await;
+
+    // Microsoft: group-based assignment is supported only for security groups.
+    let group = graph
+        .post_created(
+            "/v1.0/groups",
+            &json!({
+                "displayName": "Team mailbox",
+                "mailEnabled": true,
+                "mailNickname": "team",
+                "securityEnabled": false,
+                "groupTypes": ["Unified"]
+            }),
+        )
+        .await;
+    let group_id = group["id"].as_str().unwrap();
+    let added = graph
+        .post(
+            &format!("/v1.0/groups/{group_id}/members/$ref"),
+            &json!({ "@odata.id": format!("https://graph.microsoft.com/v1.0/directoryObjects/{}", bob.user_id) }),
+        )
+        .await;
+    assert_eq!(added.status(), 204);
+    graph.assign_role(group_id, &orders, "Writer").await;
+
+    let tokens = complete_flow(
+        &sim,
+        &bob,
+        "openid api://orders/Orders.Read",
+        Some(VERIFIER),
+    )
+    .await;
+    let claims = common::decode_claims(tokens["access_token"].as_str().unwrap());
+    assert!(claims.get("roles").is_none(), "{claims}");
+}
