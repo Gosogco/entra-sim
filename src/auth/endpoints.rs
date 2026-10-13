@@ -11,6 +11,7 @@ use time::{Duration, OffsetDateTime};
 use tracing::{info, warn};
 
 use crate::auth::claims::{self, TokenType};
+use crate::auth::client_auth::{self, Presented};
 use crate::auth::oauth_error::{self, OAuthFailure};
 use crate::auth::scopes::{self, RequestedResource};
 use crate::auth::sessions::{Grant, IssuedToken, SubjectKind, TokenKind};
@@ -34,6 +35,9 @@ pub struct TokenRequest {
     pub redirect_uri: Option<String>,
     pub code_verifier: Option<String>,
     pub refresh_token: Option<String>,
+    pub client_assertion_type: Option<String>,
+    /// A JWT signed by the client, in place of a secret.
+    pub client_assertion: Option<String>,
     /// The incoming token, in the on-behalf-of flow.
     pub assertion: Option<String>,
     pub requested_token_use: Option<String>,
@@ -89,7 +93,7 @@ async fn client_credentials(
     headers: &HeaderMap,
     request: &TokenRequest,
 ) -> Result<Json<TokenResponse>, OAuthFailure> {
-    let (client_id, client_secret) = client_credentials_from(headers, request)?;
+    let (client_id, presented) = required_credential(headers, request)?;
 
     // The app-only flow is always `{resource}/.default`: it asks for every app role already
     // granted, because there is no user present to consent to anything narrower.
@@ -105,13 +109,7 @@ async fn client_credentials(
     let Some(application) = directory.application_by_app_id(&client_id) else {
         return Err(oauth_error::unknown_client(&client_id));
     };
-    if directory
-        .matching_credential(&client_id, &client_secret, now)
-        .is_none()
-    {
-        warn!(client_id = %client_id, "rejected a token request with an invalid secret");
-        return Err(oauth_error::invalid_client_secret());
-    }
+    let client_auth = authenticate(state, &directory, tenant, &client_id, &presented, now)?;
 
     // The token represents the service principal, not the application registration.
     let Some(principal) = directory.service_principal_by_app_id(&client_id) else {
@@ -146,6 +144,7 @@ async fn client_credentials(
                 client_id: &client_id,
                 principal_id: &principal.id,
                 display_name: Some(&application.display_name),
+                client_auth,
                 roles: roles.clone(),
                 ttl_seconds: state.config.token_ttl_seconds,
             },
@@ -163,7 +162,7 @@ async fn client_credentials(
                 tenant_id: tenant,
                 base_url: &advertised,
                 client_id: &client_id,
-                client_auth: ClientAuth::Secret,
+                client_auth,
                 subject: ApiTokenSubject::App {
                     principal_id: &principal.id,
                 },
@@ -270,8 +269,7 @@ async fn authorization_code(
     // A confidential client must still authenticate; a public one has no secret to present and
     // relies on PKCE instead.
     let client_auth =
-        authenticate_client_if_secret_presented(state, &issued.client_id, headers, request, now)
-            .await?;
+        authenticate_if_presented(state, tenant, &issued.client_id, headers, request, now).await?;
 
     let target = {
         let directory = state.store.read().await;
@@ -341,8 +339,7 @@ async fn refresh_token(
     }
 
     let client_auth =
-        authenticate_client_if_secret_presented(state, &issued.client_id, headers, request, now)
-            .await?;
+        authenticate_if_presented(state, tenant, &issued.client_id, headers, request, now).await?;
 
     // The consented scopes are read again here, not taken from the refresh token. Entra
     // invalidates a refresh token when consent is revoked, so a token minted from an old one
@@ -409,21 +406,16 @@ async fn on_behalf_of(
         )
     })?;
     // The middle tier is a confidential client and must authenticate.
-    let (client_id, client_secret) = client_credentials_from(headers, request)?;
+    let (client_id, presented) = required_credential(headers, request)?;
     let now = OffsetDateTime::now_utc();
     let advertised = state.config.public_base_url();
 
-    let user_id = {
+    let (user_id, client_auth) = {
         let directory = state.store.read().await;
         if directory.application_by_app_id(&client_id).is_none() {
             return Err(oauth_error::unknown_client(&client_id));
         }
-        if directory
-            .matching_credential(&client_id, &client_secret, now)
-            .is_none()
-        {
-            return Err(oauth_error::invalid_client_secret());
-        }
+        let client_auth = authenticate(state, &directory, tenant, &client_id, &presented, now)?;
 
         let issuers = [
             format!("{advertised}/{tenant}/v2.0"),
@@ -450,7 +442,7 @@ async fn on_behalf_of(
                 "It is an app-only token, and the on-behalf-of flow only works for users.",
             ));
         }
-        user_id
+        (user_id, client_auth)
     };
 
     let scope = request.scope.as_deref().unwrap_or_default();
@@ -476,7 +468,7 @@ async fn on_behalf_of(
             user_id: &user_id,
             target,
             authorized_scope: scope,
-            client_auth: ClientAuth::Secret,
+            client_auth,
             nonce: None,
             // Microsoft's response lists no ID token for this flow.
             id_token: false,
@@ -726,6 +718,7 @@ async fn issue_user_tokens(
                 display_name: &display_name,
                 scope: &scope,
                 roles: roles.clone(),
+                client_auth,
                 ttl_seconds: state.config.token_ttl_seconds,
             },
             now,
@@ -894,62 +887,121 @@ fn api_audience(version: TokenVersion, app_id: &str, requested_as: &str) -> Stri
     }
 }
 
-/// Verify a client secret when one is presented, and report how the client authenticated.
+/// Authenticate the client when it presented a credential, and report how it did.
 ///
-/// A public client has no secret and proves itself with PKCE instead, so an absent secret is not
-/// an error here. A wrong one is.
-async fn authenticate_client_if_secret_presented(
+/// A public client has no secret and proves itself with PKCE instead, so an absent credential is
+/// not an error here. A wrong one is.
+async fn authenticate_if_presented(
     state: &AppState,
+    tenant: &str,
     client_id: &str,
     headers: &HeaderMap,
     request: &TokenRequest,
     now: OffsetDateTime,
 ) -> Result<ClientAuth, OAuthFailure> {
-    let secret = request
-        .client_secret
-        .clone()
-        .or_else(|| basic_auth(headers).map(|(_, secret)| secret));
-    let Some(secret) = secret else {
+    let (_, presented) = presented_credential(headers, request)?;
+    let Some(presented) = presented else {
         return Ok(ClientAuth::Public);
     };
-
     let directory = state.store.read().await;
-    if directory
-        .matching_credential(client_id, &secret, now)
-        .is_none()
-    {
-        warn!(client_id, "rejected a code exchange with an invalid secret");
-        return Err(oauth_error::invalid_client_secret());
-    }
-    Ok(ClientAuth::Secret)
+    authenticate(state, &directory, tenant, client_id, &presented, now)
 }
 
-/// Read the client's credentials from either `client_secret_post` or `client_secret_basic`.
+/// Check a presented credential against the client's registration.
+fn authenticate(
+    state: &AppState,
+    directory: &crate::store::Directory,
+    tenant: &str,
+    client_id: &str,
+    presented: &Presented,
+    now: OffsetDateTime,
+) -> Result<ClientAuth, OAuthFailure> {
+    match presented {
+        Presented::Secret(secret) => {
+            if directory
+                .matching_credential(client_id, secret, now)
+                .is_none()
+            {
+                warn!(client_id, "rejected a token request with an invalid secret");
+                return Err(oauth_error::invalid_client_secret());
+            }
+            Ok(ClientAuth::Secret)
+        }
+        Presented::Assertion(assertion) => {
+            client_auth::verify_certificate_assertion(
+                directory,
+                client_id,
+                assertion,
+                &token_endpoint_urls(state, tenant),
+                now,
+            )?;
+            Ok(ClientAuth::Certificate)
+        }
+    }
+}
+
+/// The token endpoint URLs a client assertion's `aud` may name: this tenant's, under any of the
+/// names the simulator answers to, for both protocol versions.
+fn token_endpoint_urls(state: &AppState, tenant: &str) -> Vec<String> {
+    let base = state.config.public_base_url();
+    [
+        tenant,
+        &state.config.tenant_domain,
+        "common",
+        "organizations",
+    ]
+    .iter()
+    .flat_map(|name| {
+        [
+            format!("{base}/{name}/oauth2/v2.0/token"),
+            format!("{base}/{name}/oauth2/token"),
+        ]
+    })
+    .collect()
+}
+
+/// Read the client ID and the credential the request presents: `client_secret_post`,
+/// `client_secret_basic` or `private_key_jwt`.
 ///
 /// Body parameters win when both are present, matching Entra, which is lenient here.
-fn client_credentials_from(
+fn presented_credential(
     headers: &HeaderMap,
     request: &TokenRequest,
-) -> Result<(String, String), OAuthFailure> {
-    if let (Some(id), Some(secret)) = (&request.client_id, &request.client_secret) {
-        return Ok((id.clone(), secret.clone()));
-    }
-
-    if let Some(credentials) = basic_auth(headers) {
-        return Ok(credentials);
-    }
-
-    // `client_assertion` is the remaining documented method, but verifying one needs the
-    // client's certificate from its keyCredentials, which arrive with the applications API.
-    if request.client_id.is_some() {
-        return Err(oauth_error::invalid_request(
-            "AADSTS900144: The request body must contain the following parameter: \
-             'client_secret' or 'client_assertion'.",
+) -> Result<(Option<String>, Option<Presented>), OAuthFailure> {
+    if let Some(assertion) = &request.client_assertion {
+        if request.client_assertion_type.as_deref() != Some(client_auth::JWT_BEARER_ASSERTION) {
+            return Err(oauth_error::invalid_request(format!(
+                "AADSTS900144: The request body must contain the following parameter: \
+                 'client_assertion_type' with the value {:?}.",
+                client_auth::JWT_BEARER_ASSERTION
+            )));
+        }
+        return Ok((
+            request.client_id.clone(),
+            Some(Presented::Assertion(assertion.clone())),
         ));
     }
-    Err(oauth_error::invalid_request(
-        "AADSTS900144: The request body must contain the following parameter: 'client_id'.",
-    ))
+    if let (Some(id), Some(secret)) = (&request.client_id, &request.client_secret) {
+        return Ok((Some(id.clone()), Some(Presented::Secret(secret.clone()))));
+    }
+    if let Some((id, secret)) = basic_auth(headers) {
+        return Ok((Some(id), Some(Presented::Secret(secret))));
+    }
+    Ok((request.client_id.clone(), None))
+}
+
+/// The client ID and credential a confidential client must present.
+fn required_credential(
+    headers: &HeaderMap,
+    request: &TokenRequest,
+) -> Result<(String, Presented), OAuthFailure> {
+    match presented_credential(headers, request)? {
+        (Some(id), Some(presented)) => Ok((id, presented)),
+        (Some(_), None) => Err(oauth_error::invalid_client_credential_missing()),
+        (None, _) => Err(oauth_error::invalid_request(
+            "AADSTS900144: The request body must contain the following parameter: 'client_id'.",
+        )),
+    }
 }
 
 /// Decode an HTTP Basic credential pair, which OAuth requires be form-urlencoded before use.

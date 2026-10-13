@@ -62,6 +62,7 @@ pub struct AppTokenRequest<'a> {
     pub client_id: &'a str,
     pub principal_id: &'a str,
     pub display_name: Option<&'a str>,
+    pub client_auth: ClientAuth,
     pub roles: Vec<String>,
     pub ttl_seconds: u64,
 }
@@ -80,7 +81,7 @@ pub fn issue_app_token(
         nbf: issued_at,
         exp: issued_at + request.ttl_seconds as i64,
         appid: request.client_id.to_string(),
-        appidacr: APPIDACR_CLIENT_SECRET.to_string(),
+        appidacr: request.client_auth.code().to_string(),
         idtyp: "app".to_string(),
         // For an app-only token Entra sets `sub` to the service principal's object ID, the same
         // value as `oid`; there is no user to subject the token to.
@@ -143,6 +144,7 @@ pub struct UserTokenRequest<'a> {
     pub scope: &'a str,
     /// App roles assigned to the user on the resource.
     pub roles: Vec<String>,
+    pub client_auth: ClientAuth,
     pub ttl_seconds: u64,
 }
 
@@ -160,7 +162,7 @@ pub fn issue_user_token(
         nbf: issued_at,
         exp: issued_at + request.ttl_seconds as i64,
         appid: request.client_id.to_string(),
-        appidacr: APPIDACR_CLIENT_SECRET.to_string(),
+        appidacr: request.client_auth.code().to_string(),
         // `user` marks a token obtained on behalf of a signed-in user.
         idtyp: "user".to_string(),
         // The subject is the user, not the application.
@@ -185,18 +187,20 @@ pub fn issue_user_token(
 }
 
 /// How the client proved its identity, reported as `azpacr` in a v2 token and `appidacr` in a v1
-/// token: `0` for a public client, `1` for a client secret.
+/// token: `0` for a public client, `1` for a client secret, `2` for a certificate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientAuth {
     Public,
     Secret,
+    Certificate,
 }
 
 impl ClientAuth {
-    fn code(self) -> &'static str {
+    pub fn code(self) -> &'static str {
         match self {
             Self::Public => "0",
             Self::Secret => APPIDACR_CLIENT_SECRET,
+            Self::Certificate => "2",
         }
     }
 }

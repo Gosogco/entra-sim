@@ -215,8 +215,8 @@ breaks the simulator surfaces as a failing check rather than a confusing provide
 - Writes are immediately readable; there is no eventual consistency to trip over.
 - Conditional access, entitlement management, administrative units, PIM and synchronization jobs
   are all out of scope.
-- `client_assertion` (`private_key_jwt`) client authentication is not implemented; secrets and
-  PKCE are.
+- `client_assertion` is implemented for certificates registered in the application's
+  `keyCredentials`, not yet for federated identity credentials.
 
 ## Building
 

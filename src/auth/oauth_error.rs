@@ -121,6 +121,49 @@ pub fn invalid_client_secret() -> OAuthFailure {
     }
 }
 
+/// A confidential client presented neither a secret nor an assertion. Microsoft's reference:
+/// "AADSTS7000218 The request body must contain the following parameter: 'client_assertion' or
+/// 'client_secret'."
+pub fn invalid_client_credential_missing() -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::UNAUTHORIZED,
+        body: OAuthError::new(
+            "invalid_client",
+            7000218,
+            "AADSTS7000218: The request body must contain the following parameter: \
+             'client_assertion' or 'client_secret'."
+                .to_string(),
+        ),
+    }
+}
+
+/// A client assertion's signature could not be checked against a registered certificate.
+/// Microsoft's reference: "AADSTS700027 Client assertion failed signature validation."
+pub fn invalid_client_assertion(reason: &str) -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::UNAUTHORIZED,
+        body: OAuthError::new(
+            "invalid_client",
+            700027,
+            format!("AADSTS700027: Client assertion failed signature validation. {reason}"),
+        ),
+    }
+}
+
+/// A client assertion is signed correctly but not valid. Microsoft's reference: "AADSTS50027
+/// InvalidJwtToken - Invalid JWT token because of the following reasons: ... unexpected issuer -
+/// unexpected audience - not within its valid time range".
+pub fn invalid_jwt(reason: &str) -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::UNAUTHORIZED,
+        body: OAuthError::new(
+            "invalid_client",
+            50027,
+            format!("AADSTS50027: Invalid JWT token. {reason}"),
+        ),
+    }
+}
+
 /// The requested scope does not name a resource the simulator serves.
 pub fn invalid_scope(scope: &str) -> OAuthFailure {
     OAuthFailure {
