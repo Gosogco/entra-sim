@@ -116,6 +116,20 @@ pub fn validate(
     decode::<AccessTokenClaims>(token, &key.decoding, &validation).map(|data| data.claims)
 }
 
+/// Verify a token this simulator issued, by its signature, issuer and lifetime, and return its
+/// claims. The audience is left to the caller, which knows what it should be.
+pub fn decode_issued(
+    key: &SigningKey,
+    token: &str,
+    issuers: &[String],
+) -> Result<serde_json::Value, jsonwebtoken::errors::Error> {
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.validate_aud = false;
+    validation.set_issuer(issuers);
+    validation.validate_nbf = true;
+    decode::<serde_json::Value>(token, &key.decoding, &validation).map(|data| data.claims)
+}
+
 /// Everything needed to mint a token on behalf of a user.
 pub struct UserTokenRequest<'a> {
     pub audience: &'a str,

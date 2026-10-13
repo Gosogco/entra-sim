@@ -34,6 +34,9 @@ pub struct TokenRequest {
     pub redirect_uri: Option<String>,
     pub code_verifier: Option<String>,
     pub refresh_token: Option<String>,
+    /// The incoming token, in the on-behalf-of flow.
+    pub assertion: Option<String>,
+    pub requested_token_use: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -72,6 +75,7 @@ async fn token(
         Some("client_credentials") => client_credentials(&state, &tenant, &headers, &request).await,
         Some("authorization_code") => authorization_code(&state, &tenant, &headers, &request).await,
         Some("refresh_token") => refresh_token(&state, &tenant, &headers, &request).await,
+        Some(JWT_BEARER) => on_behalf_of(&state, &tenant, &headers, &request).await,
         Some(other) => Err(oauth_error::unsupported_grant_type(other)),
         None => Err(oauth_error::invalid_request(
             "AADSTS900144: The request body must contain the following parameter: 'grant_type'.",
@@ -293,6 +297,7 @@ async fn authorization_code(
             authorized_scope: &issued.scope,
             client_auth,
             nonce: issued.nonce.as_deref(),
+            id_token: true,
             grant: Grant::AuthorizationCode,
         },
         now,
@@ -368,6 +373,7 @@ async fn refresh_token(
             // A refreshed ID token carries no nonce; there was no fresh authorization request
             // to bind it to.
             nonce: None,
+            id_token: true,
             grant: Grant::RefreshToken,
         },
         now,
@@ -375,7 +381,113 @@ async fn refresh_token(
     .await
 }
 
-/// Which grant is redeeming the sign-in. Microsoft documents different rules for the two.
+/// The grant type of the on-behalf-of flow.
+const JWT_BEARER: &str = "urn:ietf:params:oauth:grant-type:jwt-bearer";
+
+/// Exchange a user's token for one API into a token for another, for the API the first token
+/// was issued to.
+///
+/// Microsoft's on-behalf-of documentation: the `assertion` "must have an audience (`aud`) claim
+/// of the app making this OBO request", "the OBO flow only works for user principals", and the
+/// middle tier "only uses delegated scopes and not application roles. Roles remain attached to
+/// the principal (the user) and never to the application operating on the user's behalf."
+async fn on_behalf_of(
+    state: &AppState,
+    tenant: &str,
+    headers: &HeaderMap,
+    request: &TokenRequest,
+) -> Result<Json<TokenResponse>, OAuthFailure> {
+    if request.requested_token_use.as_deref() != Some("on_behalf_of") {
+        return Err(oauth_error::invalid_request(
+            "AADSTS900144: The request body must contain the following parameter: \
+             'requested_token_use'.",
+        ));
+    }
+    let assertion = request.assertion.as_deref().ok_or_else(|| {
+        oauth_error::invalid_request(
+            "AADSTS900144: The request body must contain the following parameter: 'assertion'.",
+        )
+    })?;
+    // The middle tier is a confidential client and must authenticate.
+    let (client_id, client_secret) = client_credentials_from(headers, request)?;
+    let now = OffsetDateTime::now_utc();
+    let advertised = state.config.public_base_url();
+
+    let user_id = {
+        let directory = state.store.read().await;
+        if directory.application_by_app_id(&client_id).is_none() {
+            return Err(oauth_error::unknown_client(&client_id));
+        }
+        if directory
+            .matching_credential(&client_id, &client_secret, now)
+            .is_none()
+        {
+            return Err(oauth_error::invalid_client_secret());
+        }
+
+        let issuers = [
+            format!("{advertised}/{tenant}/v2.0"),
+            crate::auth::token::v1_issuer(tenant),
+        ];
+        let claims = crate::auth::token::decode_issued(&state.signing_key, assertion, &issuers)
+            .map_err(|error| {
+                oauth_error::invalid_assertion(&format!("It could not be validated: {error}."))
+            })?;
+
+        let audience = claims["aud"].as_str().unwrap_or_default();
+        let addressed_to = directory
+            .resource_for(audience, &advertised)
+            .map(|principal| principal.app_id.clone());
+        if addressed_to.as_deref() != Some(client_id.as_str()) {
+            return Err(oauth_error::invalid_assertion(&format!(
+                "Its audience {audience:?} is not the application {client_id:?} making the \
+                 request."
+            )));
+        }
+        let user_id = claims["oid"].as_str().unwrap_or_default().to_string();
+        if claims["idtyp"] == "app" || !directory.users.contains_key(&user_id) {
+            return Err(oauth_error::invalid_assertion(
+                "It is an app-only token, and the on-behalf-of flow only works for users.",
+            ));
+        }
+        user_id
+    };
+
+    let scope = request.scope.as_deref().unwrap_or_default();
+    let target = {
+        let directory = state.store.read().await;
+        user_token_target(
+            &directory,
+            state,
+            tenant,
+            &client_id,
+            &user_id,
+            scope,
+            Some(scope),
+            Redemption::OnBehalfOf,
+        )?
+    };
+
+    issue_user_tokens(
+        state,
+        tenant,
+        SignIn {
+            client_id: &client_id,
+            user_id: &user_id,
+            target,
+            authorized_scope: scope,
+            client_auth: ClientAuth::Secret,
+            nonce: None,
+            // Microsoft's response lists no ID token for this flow.
+            id_token: false,
+            grant: Grant::OnBehalfOf,
+        },
+        now,
+    )
+    .await
+}
+
+/// Which grant is redeeming the sign-in. Microsoft documents different rules for each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Redemption {
     /// "The scopes must all be from a single resource", and a named permission that was never
@@ -387,6 +499,9 @@ enum Redemption {
     /// Microsoft identity platform returns a token for the resource specified in the first
     /// scope." Permissions no longer consented are left out of the token.
     RefreshToken,
+    /// One API per token, and the user must already have consented to the middle tier calling
+    /// it: "the middle-tier service has no user interaction to get the user's consent".
+    OnBehalfOf,
 }
 
 /// The API a user token is for, and the permissions the user consented to on it.
@@ -430,9 +545,7 @@ fn user_token_target(
     let mut resources = scopes::resolve(directory, &base_url, &named)
         .map_err(|unknown| oauth_error::invalid_resource(&unknown, tenant))?;
     // The sign-in may have named several APIs; only the redemption's own scope must name one.
-    if resources.len() > 1
-        && redemption == Redemption::AuthorizationCode
-        && !requested_named.is_empty()
+    if resources.len() > 1 && redemption != Redemption::RefreshToken && !requested_named.is_empty()
     {
         return Err(oauth_error::multiple_resources(
             requested_scope.unwrap_or_default(),
@@ -462,6 +575,23 @@ fn user_token_target(
     }
 
     let granted = directory.consented_scopes(client_id, user_id, &resource.principal_id);
+    if redemption == Redemption::OnBehalfOf {
+        let missing = resource
+            .named_scopes()
+            .find(|scope| !granted.contains(scope));
+        if let Some(scope) = missing {
+            return Err(oauth_error::on_behalf_of_consent_required(
+                &resource.qualify(scope),
+            ));
+        }
+        if granted.is_empty() {
+            let named = resource
+                .requested_as
+                .as_deref()
+                .unwrap_or("Microsoft Graph");
+            return Err(oauth_error::on_behalf_of_consent_required(named));
+        }
+    }
     if redemption == Redemption::AuthorizationCode
         && !requested_named.is_empty()
         && let Some(missing) = resource
@@ -491,6 +621,8 @@ struct SignIn<'a> {
     authorized_scope: &'a str,
     client_auth: ClientAuth,
     nonce: Option<&'a str>,
+    /// Whether to issue an ID token alongside the access token.
+    id_token: bool,
     grant: Grant,
 }
 
@@ -508,6 +640,7 @@ async fn issue_user_tokens(
         authorized_scope,
         client_auth,
         nonce,
+        id_token: wants_id_token,
         grant,
     } = sign_in;
     let advertised = state.config.public_base_url();
@@ -638,22 +771,27 @@ async fn issue_user_tokens(
     if !id_roles.is_empty() {
         id_claims.insert("roles".to_string(), serde_json::json!(id_roles));
     }
-    let id_token = crate::auth::token::issue_id_token(
-        &state.signing_key,
-        crate::auth::token::IdTokenRequest {
-            issuer: &issuer,
-            tenant_id: tenant,
-            client_id,
-            user_id,
-            user_principal_name: &user_principal_name,
-            display_name: &display_name,
-            nonce,
-            extra_claims: id_claims,
-            ttl_seconds: state.config.token_ttl_seconds,
-        },
-        now,
-    )
-    .map_err(|error| oauth_error::server_error(error.to_string()))?;
+    let id_token = if wants_id_token {
+        let signed = crate::auth::token::issue_id_token(
+            &state.signing_key,
+            crate::auth::token::IdTokenRequest {
+                issuer: &issuer,
+                tenant_id: tenant,
+                client_id,
+                user_id,
+                user_principal_name: &user_principal_name,
+                display_name: &display_name,
+                nonce,
+                extra_claims: id_claims,
+                ttl_seconds: state.config.token_ttl_seconds,
+            },
+            now,
+        )
+        .map_err(|error| oauth_error::server_error(error.to_string()))?;
+        Some(signed)
+    } else {
+        None
+    };
 
     let mut sessions = state.sessions.lock().await;
     sessions.evict_expired(now);
@@ -678,7 +816,9 @@ async fn issue_user_tokens(
     };
     // The ID token first, so the access token, the one a reader usually wants, ends up on top
     // of the newest-first log.
-    sessions.record_issued(issued(TokenKind::Id, client_id, Vec::new()));
+    if id_token.is_some() {
+        sessions.record_issued(issued(TokenKind::Id, client_id, Vec::new()));
+    }
     sessions.record_issued(issued(TokenKind::Access, &audience, target.granted.clone()));
 
     let refresh = if target.offline_access {
@@ -718,7 +858,7 @@ async fn issue_user_tokens(
         ext_expires_in: expires_in,
         access_token,
         scope: Some(qualified.join(" ")),
-        id_token: Some(id_token),
+        id_token,
         refresh_token: refresh,
     }))
 }

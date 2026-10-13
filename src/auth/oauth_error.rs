@@ -15,6 +15,10 @@ pub struct OAuthError {
     pub error: &'static str,
     pub error_description: String,
     pub error_codes: Vec<u32>,
+    /// Entra's refinement of `error`, which MSAL reads, for example `consent_required` on an
+    /// `invalid_grant`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suberror: Option<&'static str>,
     pub timestamp: String,
     pub trace_id: String,
     pub correlation_id: String,
@@ -39,6 +43,7 @@ impl OAuthError {
             error,
             error_description: description,
             error_codes: vec![code],
+            suberror: None,
             timestamp: OffsetDateTime::now_utc()
                 .format(&format)
                 .unwrap_or_default(),
@@ -201,6 +206,40 @@ pub fn app_not_assigned(client: &str, resource_app_id: &str, resource_name: &str
                  application '{resource_app_id}'({resource_name})."
             ),
         ),
+    }
+}
+
+/// The assertion in an on-behalf-of request is not usable. Microsoft's reference:
+/// "AADSTS50013 InvalidAssertion - Assertion is invalid because of various reasons".
+pub fn invalid_assertion(reason: &str) -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "invalid_grant",
+            50013,
+            format!("AADSTS50013: Assertion is invalid. {reason}"),
+        ),
+    }
+}
+
+/// The user has not consented to the middle-tier application calling the downstream API.
+///
+/// An `invalid_grant` with the suberror `consent_required`, which is what MSAL turns into a
+/// request for interaction.
+pub fn on_behalf_of_consent_required(scope: &str) -> OAuthFailure {
+    let mut body = OAuthError::new(
+        "invalid_grant",
+        65001,
+        format!(
+            "AADSTS65001: The user or administrator has not consented to use the application \
+             for the permission {scope}. Send an interactive authorization request for this \
+             user and resource."
+        ),
+    );
+    body.suberror = Some("consent_required");
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body,
     }
 }
 

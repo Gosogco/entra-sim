@@ -87,6 +87,8 @@ pub enum Grant {
     ClientCredentials,
     AuthorizationCode,
     RefreshToken,
+    /// `urn:ietf:params:oauth:grant-type:jwt-bearer` with `requested_token_use=on_behalf_of`.
+    OnBehalfOf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

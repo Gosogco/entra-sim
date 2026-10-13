@@ -71,7 +71,12 @@ pub fn document(base_url: &str, tenant: &str) -> OpenIdConfiguration {
         end_session_endpoint: format!("{base_url}/{tenant}/oauth2/v2.0/logout"),
         response_types_supported: vec!["code"],
         response_modes_supported: vec!["query", "fragment", "form_post"],
-        grant_types_supported: vec!["authorization_code", "refresh_token", "client_credentials"],
+        grant_types_supported: vec![
+            "authorization_code",
+            "refresh_token",
+            "client_credentials",
+            "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        ],
         subject_types_supported: vec!["pairwise"],
         id_token_signing_alg_values_supported: vec!["RS256"],
         token_endpoint_auth_methods_supported: vec![
