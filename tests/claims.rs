@@ -405,3 +405,239 @@ async fn the_id_token_carries_the_users_roles_on_the_client() {
     let access = decode_claims(body["access_token"].as_str().unwrap());
     assert!(access.get("roles").is_none(), "{access}");
 }
+
+/// Carol has a mail address, names and a preferred language; `user_type` is Member or Guest.
+async fn carol(graph: &Graph, user_type: &str) -> String {
+    graph
+        .post_created(
+            "/v1.0/users",
+            &json!({
+                "displayName": "Carol Example",
+                "givenName": "Carol",
+                "surname": "Example",
+                "mail": "carol@mail.example.test",
+                "preferredLanguage": "da-DK",
+                "userType": user_type,
+                "userPrincipalName": "carol@sim.test",
+                "mailNickname": "carol",
+                "accountEnabled": true,
+                "passwordProfile": { "password": "Sup3rSecret!" }
+            }),
+        )
+        .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+fn optional(names: &[&str]) -> Value {
+    json!(
+        names
+            .iter()
+            .map(|name| json!({ "name": name }))
+            .collect::<Vec<_>>()
+    )
+}
+
+#[tokio::test]
+async fn a_v2_access_token_carries_the_optional_claims_the_api_asks_for() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let carol = carol(&graph, "Member").await;
+    graph
+        .register_api(
+            "Orders",
+            "api://orders",
+            &[],
+            &["Orders.Read"],
+            json!({
+                "api": { "requestedAccessTokenVersion": 2 },
+                "optionalClaims": { "accessToken": [
+                    { "name": "email" }, { "name": "given_name" }, { "name": "family_name" },
+                    { "name": "upn" }, { "name": "acct" }, { "name": "amr" }, { "name": "xms_pl" },
+                    { "name": "idtyp", "additionalProperties": ["include_user_token"] }
+                ] }
+            }),
+        )
+        .await;
+    let client = graph
+        .register_public_client("Orders website", json!({}))
+        .await;
+
+    let body = sim
+        .sign_in_ok(
+            &client.app_id,
+            &carol,
+            "openid profile api://orders/Orders.Read",
+        )
+        .await;
+    let access = decode_claims(body["access_token"].as_str().unwrap());
+    assert_eq!(access["email"], "carol@mail.example.test");
+    assert_eq!(access["given_name"], "Carol");
+    assert_eq!(access["family_name"], "Example");
+    assert_eq!(access["upn"], "carol@sim.test");
+    assert_eq!(access["acct"], 0);
+    assert_eq!(access["amr"], json!(["pwd"]));
+    assert_eq!(access["xms_pl"], "da-DK");
+    assert_eq!(access["idtyp"], "user");
+}
+
+#[tokio::test]
+async fn name_claims_in_a_v2_token_need_the_profile_scope() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let carol = carol(&graph, "Member").await;
+    graph
+        .register_api(
+            "Orders",
+            "api://orders",
+            &[],
+            &["Orders.Read"],
+            json!({
+                "api": { "requestedAccessTokenVersion": 2 },
+                "optionalClaims": { "accessToken": optional(&["email", "given_name", "upn"]) }
+            }),
+        )
+        .await;
+    let client = graph
+        .register_public_client("Orders website", json!({}))
+        .await;
+
+    let body = sim
+        .sign_in_ok(&client.app_id, &carol, "openid api://orders/Orders.Read")
+        .await;
+    let access = decode_claims(body["access_token"].as_str().unwrap());
+    // Microsoft lists given_name and upn as "Requires the profile scope"; email does not.
+    assert!(access.get("given_name").is_none(), "{access}");
+    assert!(access.get("upn").is_none(), "{access}");
+    assert_eq!(access["email"], "carol@mail.example.test");
+}
+
+#[tokio::test]
+async fn email_is_left_out_unless_asked_for_or_the_user_is_a_guest() {
+    for (user_type, expected) in [("Member", None), ("Guest", Some("carol@mail.example.test"))] {
+        let sim = Sim::start().await;
+        let graph = sim.graph().await;
+        let carol = carol(&graph, user_type).await;
+        graph
+            .register_api(
+                "Orders",
+                "api://orders",
+                &[],
+                &["Orders.Read"],
+                json!({ "api": { "requestedAccessTokenVersion": 2 } }),
+            )
+            .await;
+        let client = graph
+            .register_public_client("Orders website", json!({}))
+            .await;
+
+        let body = sim
+            .sign_in_ok(&client.app_id, &carol, "openid api://orders/Orders.Read")
+            .await;
+        let access = decode_claims(body["access_token"].as_str().unwrap());
+        // "Present by default for guest accounts that have an email address."
+        assert_eq!(
+            access.get("email").and_then(Value::as_str),
+            expected,
+            "{access}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_id_token_carries_email_for_the_email_scope_or_the_optional_claim() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let carol = carol(&graph, "Member").await;
+    let plain = graph.register_public_client("Plain", json!({})).await;
+    let asking = graph
+        .register_public_client(
+            "Asking",
+            json!({ "optionalClaims": { "idToken": optional(&["email"]) } }),
+        )
+        .await;
+
+    let id = |body: Value| decode_claims(body["id_token"].as_str().unwrap());
+    // "On the v2.0 endpoint, your app can also request the email OpenID Connect scope".
+    let by_scope = id(sim
+        .sign_in_ok(&plain.app_id, &carol, "openid email User.Read")
+        .await);
+    assert_eq!(by_scope["email"], "carol@mail.example.test");
+    let neither = id(sim
+        .sign_in_ok(&plain.app_id, &carol, "openid User.Read")
+        .await);
+    assert!(neither.get("email").is_none(), "{neither}");
+    let by_claim = id(sim
+        .sign_in_ok(&asking.app_id, &carol, "openid User.Read")
+        .await);
+    assert_eq!(by_claim["email"], "carol@mail.example.test");
+}
+
+#[tokio::test]
+async fn a_claim_without_a_value_is_left_out() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let dave = graph.create_user("dave@sim.test", "Dave Example").await;
+    graph
+        .register_api(
+            "Orders",
+            "api://orders",
+            &[],
+            &["Orders.Read"],
+            json!({
+                "api": { "requestedAccessTokenVersion": 2 },
+                "optionalClaims": { "accessToken": optional(&["email", "given_name", "xms_pl"]) }
+            }),
+        )
+        .await;
+    let client = graph
+        .register_public_client("Orders website", json!({}))
+        .await;
+
+    let body = sim
+        .sign_in_ok(
+            &client.app_id,
+            &dave,
+            "openid profile api://orders/Orders.Read",
+        )
+        .await;
+    let access = decode_claims(body["access_token"].as_str().unwrap());
+    // "Claims are present only if a value exists to fill it."
+    for claim in ["email", "given_name", "xms_pl"] {
+        assert!(access.get(claim).is_none(), "{claim}: {access}");
+    }
+}
+
+#[tokio::test]
+async fn v1_optional_claims_preferred_username_and_aud_as_guid() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let carol = carol(&graph, "Member").await;
+    let orders = graph
+        .register_api(
+            "Orders",
+            "api://orders",
+            &[],
+            &["Orders.Read"],
+            json!({
+                "optionalClaims": { "accessToken": [
+                    { "name": "preferred_username" },
+                    { "name": "aud", "additionalProperties": ["use_guid"] }
+                ] }
+            }),
+        )
+        .await;
+    let client = graph
+        .register_public_client("Orders website", json!({}))
+        .await;
+
+    let body = sim
+        .sign_in_ok(&client.app_id, &carol, "openid api://orders/Orders.Read")
+        .await;
+    let access = decode_claims(body["access_token"].as_str().unwrap());
+    assert_eq!(access["ver"], "1.0");
+    assert_eq!(access["preferred_username"], "carol@sim.test");
+    // use_guid: "Emits the client ID of the resource (API) in GUID format as the aud claim".
+    assert_eq!(access["aud"], orders.app_id.as_str());
+}

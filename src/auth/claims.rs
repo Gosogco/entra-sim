@@ -225,3 +225,120 @@ fn group_value(group: &Group, options: &[String], setting: &str) -> Option<Strin
     }
     Some(group.id.clone())
 }
+
+/// Optional claims for one token, from the `optionalClaims` of the application it is issued for.
+#[derive(Debug, Default)]
+pub struct OptionalClaims {
+    pub claims: Map<String, Value>,
+    /// The `aud` optional claim with `use_guid`: "Emits the client ID of the resource (API) in
+    /// GUID format as the `aud` claim always", in v1.0 access tokens only.
+    pub aud_use_guid: bool,
+}
+
+/// The optional claims the application `app_id` asks for in a token of `token_type` and
+/// `version` for `user`, given the OpenID Connect scopes the sign-in asked for.
+///
+/// Only claims the simulator holds data for are supported, and a claim with no value is left
+/// out: "Claims are present only if a value exists to fill it." The rules per claim are from
+/// Microsoft's optional claims reference and ID token claims reference.
+pub fn optional_claims(
+    directory: &Directory,
+    app_id: &str,
+    token_type: TokenType,
+    version: crate::store::TokenVersion,
+    user: &crate::store::model::User,
+    oidc_scopes: &[String],
+) -> OptionalClaims {
+    use crate::store::TokenVersion;
+
+    let mut result = OptionalClaims::default();
+    let requested: Vec<(String, Vec<String>)> = directory
+        .application_by_app_id(app_id)
+        .and_then(|application| application.extra.get("optionalClaims"))
+        .and_then(|claims| claims.get(token_type.optional_claims_key()))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|claim| {
+            let name = claim.get("name")?.as_str()?.to_string();
+            let properties = claim
+                .get("additionalProperties")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect();
+            Some((name, properties))
+        })
+        .collect();
+    let asked = |name: &str| requested.iter().find(|(claim, _)| claim == name);
+    let has_scope = |scope: &str| oidc_scopes.iter().any(|known| known == scope);
+    let guest = user
+        .user_type
+        .as_deref()
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("Guest"));
+    let v2 = version == TokenVersion::V2;
+    let mut set = |name: &str, value: Option<Value>| {
+        if let Some(value) = value {
+            result.claims.insert(name.to_string(), value);
+        }
+    };
+
+    // email: "Present by default for guest accounts that have an email address. Your app can
+    // request the email claim for managed users ... using the email optional claim", and "On the
+    // v2.0 endpoint, your app can also request the email OpenID Connect scope".
+    let email_by_scope = token_type == TokenType::Id && has_scope("email");
+    if guest || asked("email").is_some() || email_by_scope {
+        set("email", user.mail.clone().map(Value::from));
+    }
+    // given_name, family_name and upn are v1.0 claims; in a v2.0 token they are optional claims
+    // that "Requires the profile scope". The simulator's v1.0 access tokens carry them already.
+    if v2 && has_scope("profile") {
+        if asked("given_name").is_some() {
+            set("given_name", user.given_name.clone().map(Value::from));
+        }
+        if asked("family_name").is_some() {
+            set("family_name", user.surname.clone().map(Value::from));
+        }
+        if asked("upn").is_some() {
+            set("upn", Some(Value::from(user.user_principal_name.clone())));
+        }
+    }
+    // preferred_username: "Provides the preferred username claim within v1 tokens."
+    if !v2 && asked("preferred_username").is_some() {
+        set(
+            "preferred_username",
+            Some(Value::from(user.user_principal_name.clone())),
+        );
+    }
+    // acct: "If the user is a member of the tenant, the value is 0. If they're a guest, the
+    // value is 1."
+    if asked("acct").is_some() {
+        set("acct", Some(json!(if guest { 1 } else { 0 })));
+    }
+    // amr is one of the claims "always included in v1.0 tokens, but not included in v2.0 tokens
+    // unless requested".
+    if v2 && asked("amr").is_some() {
+        set("amr", Some(json!(["pwd"])));
+    }
+    // xms_pl: "The user's preferred language, if set."
+    if asked("xms_pl").is_some() {
+        set("xms_pl", user.extra.get("preferredLanguage").cloned());
+    }
+    if token_type == TokenType::Access {
+        // idtyp with include_user_token: "Emits the idtyp claim for users token."
+        if asked("idtyp").is_some_and(|(_, properties)| {
+            properties
+                .iter()
+                .any(|property| property == "include_user_token")
+        }) {
+            set("idtyp", Some(Value::from("user")));
+        }
+        result.aud_use_guid = !v2
+            && asked("aud").is_some_and(|(_, properties)| {
+                properties.iter().any(|property| property == "use_guid")
+            });
+    }
+    result
+}

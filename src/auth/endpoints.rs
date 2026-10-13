@@ -389,6 +389,8 @@ struct UserTokenTarget {
     granted: Vec<String>,
     /// Whether the sign-in asked for `offline_access`, which is what earns a refresh token.
     offline_access: bool,
+    /// The OpenID Connect scopes the sign-in asked for, which some claims depend on.
+    oidc: Vec<String>,
 }
 
 /// Decide which API a user token is for.
@@ -459,6 +461,7 @@ fn user_token_target(
         offline_access: authorized_oidc
             .iter()
             .any(|scope| scope == "offline_access"),
+        oidc: authorized_oidc,
     })
 }
 
@@ -503,6 +506,7 @@ async fn issue_user_tokens(
         roles,
         id_roles,
         version,
+        aud_use_guid,
         access_groups,
         id_groups,
     ) = {
@@ -523,8 +527,28 @@ async fn issue_user_tokens(
         let group_claims = |app_id: &str, token_type| {
             claims::group_claims(&directory, tenant, user_id, app_id, token_type)
         };
-        let access_groups = group_claims(&resource.app_id, TokenType::Access);
-        let id_groups = group_claims(client_id, TokenType::Id);
+        let mut access_groups = group_claims(&resource.app_id, TokenType::Access);
+        let mut id_groups = group_claims(client_id, TokenType::Id);
+        let version = directory.requested_access_token_version(&resource.app_id);
+        let access_optional = claims::optional_claims(
+            &directory,
+            &resource.app_id,
+            TokenType::Access,
+            version,
+            user,
+            &target.oidc,
+        );
+        // ID tokens come from the v2.0 endpoint, the only one the simulator implements.
+        let id_optional = claims::optional_claims(
+            &directory,
+            client_id,
+            TokenType::Id,
+            TokenVersion::V2,
+            user,
+            &target.oidc,
+        );
+        access_groups.claims.extend(access_optional.claims);
+        id_groups.claims.extend(id_optional.claims);
         (
             user.user_principal_name.clone(),
             user.display_name.clone(),
@@ -532,7 +556,8 @@ async fn issue_user_tokens(
             user.surname.clone(),
             access_groups.roles_instead.clone().unwrap_or(roles),
             id_roles,
-            directory.requested_access_token_version(&resource.app_id),
+            version,
+            access_optional.aud_use_guid,
             access_groups.claims,
             id_groups,
         )
@@ -558,11 +583,12 @@ async fn issue_user_tokens(
         );
         (advertised.clone(), signed)
     } else {
-        let audience = api_audience(
-            version,
-            &resource.app_id,
-            resource.requested_as.as_deref().unwrap_or(&resource.app_id),
-        );
+        let requested_as = if aud_use_guid {
+            &resource.app_id
+        } else {
+            resource.requested_as.as_deref().unwrap_or(&resource.app_id)
+        };
+        let audience = api_audience(version, &resource.app_id, requested_as);
         let signed = issue_api_token(
             &state.signing_key,
             ApiTokenRequest {
