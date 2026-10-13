@@ -434,7 +434,7 @@ fn user_token_target(
         && redemption == Redemption::AuthorizationCode
         && !requested_named.is_empty()
     {
-        return Err(oauth_error::invalid_scope(
+        return Err(oauth_error::multiple_resources(
             requested_scope.unwrap_or_default(),
         ));
     }

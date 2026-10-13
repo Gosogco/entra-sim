@@ -86,6 +86,21 @@ pub fn unknown_client(client_id: &str) -> OAuthFailure {
     }
 }
 
+/// The token request's scope names more than one API.
+pub fn multiple_resources(scope: &str) -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "invalid_scope",
+            700022,
+            format!(
+                "AADSTS700022: The provided value for the input parameter scope isn't valid \
+                 because it contains more than one resource. Scope {scope}"
+            ),
+        ),
+    }
+}
+
 /// The client exists but the secret did not match, or has expired.
 pub fn invalid_client_secret() -> OAuthFailure {
     OAuthFailure {

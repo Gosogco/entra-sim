@@ -1304,6 +1304,9 @@ async fn a_redemption_naming_two_apis_is_refused() {
     assert_eq!(response.status(), 400);
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["error"], "invalid_scope");
+    // Microsoft's reference: "InvalidMultipleResourcesScope - The provided value for the input
+    // parameter scope isn't valid because it contains more than one resource."
+    assert_eq!(body["error_codes"][0], 700022);
 }
 
 #[tokio::test]
