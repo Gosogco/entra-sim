@@ -124,6 +124,11 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
 /// Reinstalls the bootstrap objects and reapplies the seed, so a test suite can reset between
 /// cases without restarting the process, and two runs start from identical state.
 async fn reset(State(state): State<AppState>) -> Result<impl IntoResponse, Failure> {
+    // Every tenant is reset; the counts are the primary tenant's.
+    for tenant in state.all_tenants().iter().skip(1) {
+        let rebuilt = tenant.rebuild_initial_directory().await?;
+        *tenant.store.write().await = rebuilt;
+    }
     let seeded = state.rebuild_initial_directory().await?;
 
     let mut directory = state.store.write().await;

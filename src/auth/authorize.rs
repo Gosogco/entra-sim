@@ -72,6 +72,17 @@ impl From<Unredirectable> for Refusal {
     }
 }
 
+/// Refuse a path naming a tenant the simulator does not serve, with Entra's AADSTS90002.
+fn check_tenant(state: &AppState, named: &str) -> Result<(), Refusal> {
+    if state.config.resolve_tenant(named) == state.config.tenant_id {
+        return Ok(());
+    }
+    Err(unredirectable(format!(
+        "AADSTS90002: Tenant '{named}' not found. Check to make sure you have the correct \
+         tenant ID and are signing into the correct cloud."
+    )))
+}
+
 fn unredirectable(description: String) -> Refusal {
     Unredirectable(description).into()
 }
@@ -110,6 +121,7 @@ async fn show_sign_in(
     headers: HeaderMap,
     Query(request): Query<AuthorizeRequest>,
 ) -> Result<Response, Refusal> {
+    check_tenant(&state, &tenant)?;
     let directory = state.store.read().await;
     let validated = validate(&state, &directory, &request)?;
     let now = OffsetDateTime::now_utc();
@@ -267,6 +279,7 @@ async fn complete_sign_in(
     Form(form): Form<SignInForm>,
 ) -> Result<Response, Refusal> {
     let request = form.request;
+    check_tenant(&state, &tenant)?;
     let directory = state.store.read().await;
     let validated = validate(&state, &directory, &request)?;
 

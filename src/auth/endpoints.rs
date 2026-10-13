@@ -78,7 +78,7 @@ async fn token(
     let named_tenant = tenant;
     let tenant = state.config.resolve_tenant(&named_tenant);
     if tenant != state.config.tenant_id {
-        return Err(oauth_error::unknown_client(&tenant));
+        return Err(oauth_error::invalid_tenant(&named_tenant));
     }
 
     match request.grant_type.as_deref() {

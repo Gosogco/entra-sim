@@ -60,6 +60,16 @@ pub struct Config {
     )]
     pub tenant_id: String,
 
+    /// More tenants to serve besides the primary one, each as `TENANT_ID=DOMAIN`. Each gets its
+    /// own directory, with Microsoft Graph and the bootstrap client registered in it. The
+    /// identity endpoints pick the tenant from the path and Graph from the token's `tid`.
+    #[arg(
+        long = "additional-tenant",
+        env = "ENTRA_SIM_ADDITIONAL_TENANTS",
+        value_delimiter = ','
+    )]
+    pub additional_tenants: Vec<String>,
+
     /// Origins allowed to make cross-origin requests. Every origin is allowed when this is
     /// empty, which is what a browser client needs and what a test simulator can afford.
     #[arg(
@@ -166,16 +176,45 @@ impl Config {
         format!("https://{}", self.public_host)
     }
 
-    /// Map a tenant segment from a request path onto the single tenant this simulator serves.
+    /// Map a tenant segment from a request path onto the tenant this configuration serves.
     ///
     /// Entra accepts `common`, `organizations` and `consumers` as aliases that resolve to a
     /// concrete tenant at sign-in time, and the issuer it then stamps into tokens always names
-    /// the concrete tenant. Anything else is passed through, so that a request for the wrong
-    /// tenant is still visible as such to the handler.
+    /// the concrete tenant. It also accepts the tenant's domain name. Anything else is passed
+    /// through, so that a request for the wrong tenant is still visible as such to the handler.
     pub fn resolve_tenant(&self, tenant: &str) -> String {
         match tenant {
             "common" | "organizations" | "consumers" => self.tenant_id.clone(),
+            domain if domain.eq_ignore_ascii_case(&self.tenant_domain) => self.tenant_id.clone(),
             other => other.to_string(),
         }
+    }
+
+    /// The additional tenants, as tenant ID and domain.
+    pub fn additional_tenants(&self) -> anyhow::Result<Vec<(String, String)>> {
+        self.additional_tenants
+            .iter()
+            .map(|entry| {
+                entry
+                    .split_once('=')
+                    .map(|(id, domain)| (id.trim().to_string(), domain.trim().to_string()))
+                    .filter(|(id, domain)| !id.is_empty() && !domain.is_empty())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "an additional tenant must be TENANT_ID=DOMAIN, got {entry:?}"
+                        )
+                    })
+            })
+            .collect()
+    }
+
+    /// A copy of this configuration for another tenant.
+    pub fn for_tenant(&self, tenant_id: &str, domain: &str) -> Self {
+        let mut config = self.clone();
+        config.tenant_id = tenant_id.to_string();
+        config.tenant_domain = domain.to_string();
+        // The seed describes the primary tenant only.
+        config.seed = None;
+        config
     }
 }

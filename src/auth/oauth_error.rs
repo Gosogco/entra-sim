@@ -76,6 +76,22 @@ pub fn unsupported_grant_type(grant_type: &str) -> OAuthFailure {
     }
 }
 
+/// The path names a tenant the simulator does not serve. Microsoft's reference: "AADSTS90002
+/// InvalidTenantName - The tenant name wasn't found in the data store."
+pub fn invalid_tenant(tenant: &str) -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "invalid_tenant",
+            90002,
+            format!(
+                "AADSTS90002: Tenant '{tenant}' not found. Check to make sure you have the \
+                 correct tenant ID and are signing into the correct cloud."
+            ),
+        ),
+    }
+}
+
 /// No application is registered with the given client ID.
 pub fn unknown_client(client_id: &str) -> OAuthFailure {
     OAuthFailure {

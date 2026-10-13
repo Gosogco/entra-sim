@@ -13,6 +13,7 @@ use axum::{Router, http::header};
 use serde::Serialize;
 
 use crate::auth::keys::Jwks;
+use crate::auth::oauth_error::OAuthFailure;
 use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
@@ -152,29 +153,46 @@ const CACHE_CONTROL: (header::HeaderName, &str) =
 async fn configuration(
     State(state): State<AppState>,
     Path(tenant): Path<String>,
-) -> (
-    [(header::HeaderName, &'static str); 1],
-    Json<OpenIdConfiguration>,
-) {
-    let tenant = state.config.resolve_tenant(&tenant);
+) -> Result<
     (
+        [(header::HeaderName, &'static str); 1],
+        Json<OpenIdConfiguration>,
+    ),
+    OAuthFailure,
+> {
+    let tenant = served_tenant(&state, &tenant)?;
+    Ok((
         [CACHE_CONTROL],
         Json(document(&state.config.public_base_url(), &tenant)),
-    )
+    ))
 }
 
 async fn v1_configuration(
     State(state): State<AppState>,
     Path(tenant): Path<String>,
-) -> (
-    [(header::HeaderName, &'static str); 1],
-    Json<V1OpenIdConfiguration>,
-) {
-    let tenant = state.config.resolve_tenant(&tenant);
+) -> Result<
     (
+        [(header::HeaderName, &'static str); 1],
+        Json<V1OpenIdConfiguration>,
+    ),
+    OAuthFailure,
+> {
+    let tenant = served_tenant(&state, &tenant)?;
+    Ok((
         [CACHE_CONTROL],
         Json(v1_document(&state.config.public_base_url(), &tenant)),
-    )
+    ))
+}
+
+/// The tenant a discovery path names, or Entra's `invalid_tenant` answer for one it does not
+/// serve.
+fn served_tenant(state: &AppState, named: &str) -> Result<String, OAuthFailure> {
+    let tenant = state.config.resolve_tenant(named);
+    if tenant == state.config.tenant_id {
+        Ok(tenant)
+    } else {
+        Err(crate::auth::oauth_error::invalid_tenant(named))
+    }
 }
 
 async fn keys(
