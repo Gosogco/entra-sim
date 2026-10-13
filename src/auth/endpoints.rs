@@ -501,6 +501,7 @@ async fn issue_user_tokens(
         given_name,
         family_name,
         roles,
+        id_roles,
         version,
         access_groups,
         id_groups,
@@ -510,18 +511,13 @@ async fn issue_user_tokens(
             oauth_error::no_grant("AADSTS50034: The user account does not exist in the directory.")
         })?;
         // Microsoft: "For user tokens, this set of values contains the assigned roles of the user
-        // on the target application." Roles assigned to a group reach its direct members only:
-        // Microsoft supports group-based assignment for security groups, and "Nested group
-        // memberships aren't supported".
-        let mut holders = vec![user_id.to_string()];
-        holders.extend(
-            directory
-                .groups_containing(user_id)
-                .into_iter()
-                .filter(|group| group.security_enabled)
-                .map(|group| group.id.clone()),
-        );
-        let roles = directory.granted_role_values(&holders, &resource.principal_id);
+        // on the target application."
+        let roles = user_roles_on(&directory, user_id, &resource.principal_id);
+        // "for an app that signs in users, the roles claims are included in the ID token."
+        let id_roles = directory
+            .service_principal_by_app_id(client_id)
+            .map(|client| user_roles_on(&directory, user_id, &client.id))
+            .unwrap_or_default();
         // Each token carries the group claims of the application it is issued for: the API for
         // the access token, the client for the ID token.
         let group_claims = |app_id: &str, token_type| {
@@ -535,6 +531,7 @@ async fn issue_user_tokens(
             user.given_name.clone(),
             user.surname.clone(),
             access_groups.roles_instead.clone().unwrap_or(roles),
+            id_roles,
             directory.requested_access_token_version(&resource.app_id),
             access_groups.claims,
             id_groups,
@@ -595,8 +592,9 @@ async fn issue_user_tokens(
         signed.map_err(|error| oauth_error::server_error(error.to_string()))?;
 
     let mut id_claims = id_groups.claims;
-    if let Some(groups) = id_groups.roles_instead {
-        id_claims.insert("roles".to_string(), serde_json::json!(groups));
+    let id_roles = id_groups.roles_instead.unwrap_or(id_roles);
+    if !id_roles.is_empty() {
+        id_claims.insert("roles".to_string(), serde_json::json!(id_roles));
     }
     let id_token = crate::auth::token::issue_id_token(
         &state.signing_key,
@@ -681,6 +679,26 @@ async fn issue_user_tokens(
         id_token: Some(id_token),
         refresh_token: refresh,
     }))
+}
+
+/// The app roles a user holds on the application whose service principal is `principal_id`.
+///
+/// Roles assigned to a group reach its direct members only: Microsoft supports group-based
+/// assignment for security groups, and "Nested group memberships aren't supported".
+fn user_roles_on(
+    directory: &crate::store::Directory,
+    user_id: &str,
+    principal_id: &str,
+) -> Vec<String> {
+    let mut holders = vec![user_id.to_string()];
+    holders.extend(
+        directory
+            .groups_containing(user_id)
+            .into_iter()
+            .filter(|group| group.security_enabled)
+            .map(|group| group.id.clone()),
+    );
+    directory.granted_role_values(&holders, principal_id)
 }
 
 /// The `aud` of a token for a registered API.

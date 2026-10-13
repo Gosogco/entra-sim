@@ -368,3 +368,40 @@ async fn an_on_premises_format_leaves_out_cloud_groups() {
         assert!(!groups.contains(&json!(cloud_group)), "{access}");
     }
 }
+
+#[tokio::test]
+async fn the_id_token_carries_the_users_roles_on_the_client() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let bob = graph.create_user("bob@sim.test", "Bob Example").await;
+
+    // A web app that signs users in and defines its own roles.
+    let website = graph
+        .register_api(
+            "Orders website",
+            "api://orders-website",
+            &["Manager"],
+            &[],
+            json!({}),
+        )
+        .await;
+    let added = graph
+        .patch(
+            &format!("/v1.0/applications/{}", website.object_id),
+            &json!({ "publicClient": { "redirectUris": [common::SIGN_IN_REDIRECT] } }),
+        )
+        .await;
+    assert_eq!(added.status(), 204);
+    graph.assign_role(&bob, &website, "Manager").await;
+
+    // Microsoft: "for an app that signs in users, the roles claims are included in the ID
+    // token."
+    let body = sim
+        .sign_in_ok(&website.app_id, &bob, "openid User.Read")
+        .await;
+    let id = decode_claims(body["id_token"].as_str().unwrap());
+    assert_eq!(id["roles"], json!(["Manager"]));
+    // The access token is for Graph, where bob holds no role.
+    let access = decode_claims(body["access_token"].as_str().unwrap());
+    assert!(access.get("roles").is_none(), "{access}");
+}
