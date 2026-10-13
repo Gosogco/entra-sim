@@ -133,6 +133,22 @@ pub fn invalid_resource(resource: &str, tenant: &str) -> OAuthFailure {
     }
 }
 
+/// The token request names a permission the user has not consented to.
+pub fn consent_required(scope: &str) -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "consent_required",
+            65001,
+            format!(
+                "AADSTS65001: The user or administrator has not consented to use the \
+                 application for the permission {scope}. Send an interactive authorization \
+                 request for this user and resource."
+            ),
+        ),
+    }
+}
+
 /// The presented grant — a code, a refresh token — is not usable.
 pub fn invalid_grant(description: impl Into<String>) -> OAuthFailure {
     OAuthFailure {

@@ -11,6 +11,7 @@ use time::{Duration, OffsetDateTime};
 use tracing::{info, warn};
 
 use crate::auth::oauth_error::{self, OAuthFailure};
+use crate::auth::scopes::{self, RequestedResource};
 use crate::auth::sessions::{Grant, IssuedToken, SubjectKind, TokenKind};
 use crate::auth::token::{
     ApiTokenRequest, ApiTokenSubject, AppTokenRequest, ClientAuth, issue_api_token,
@@ -251,8 +252,24 @@ async fn authorization_code(
 
     // A confidential client must still authenticate; a public one has no secret to present and
     // relies on PKCE instead.
-    authenticate_client_if_secret_presented(state, &issued.client_id, headers, request, now)
-        .await?;
+    let client_auth =
+        authenticate_client_if_secret_presented(state, &issued.client_id, headers, request, now)
+            .await?;
+
+    let target = {
+        let directory = state.store.read().await;
+        user_token_target(
+            &directory,
+            state,
+            tenant,
+            &issued.client_id,
+            &issued.user_id,
+            &issued.scope,
+            request.scope.as_deref(),
+            // Microsoft: at code redemption "The scopes must all be from a single resource".
+            MultipleResources::Refuse,
+        )?
+    };
 
     issue_user_tokens(
         state,
@@ -260,7 +277,9 @@ async fn authorization_code(
         SignIn {
             client_id: &issued.client_id,
             user_id: &issued.user_id,
-            granted_scope: &issued.scope,
+            target,
+            authorized_scope: &issued.scope,
+            client_auth,
             nonce: issued.nonce.as_deref(),
             grant: Grant::AuthorizationCode,
         },
@@ -304,31 +323,28 @@ async fn refresh_token(
         ));
     }
 
-    authenticate_client_if_secret_presented(state, &issued.client_id, headers, request, now)
-        .await?;
+    let client_auth =
+        authenticate_client_if_secret_presented(state, &issued.client_id, headers, request, now)
+            .await?;
 
     // The consented scopes are read again here, not taken from the refresh token. Entra
     // invalidates a refresh token when consent is revoked, so a token minted from an old one
-    // must not keep permissions the directory no longer grants. Intersecting with the stored
-    // scope means a refresh can only ever narrow, never widen.
-    let scope = {
+    // must not keep permissions the directory no longer grants.
+    let target = {
         let directory = state.store.read().await;
-        let graph_id = directory
-            .graph_service_principal()
-            .map(|graph| graph.id.clone())
-            .unwrap_or_default();
-        let consented = directory.consented_scopes(&issued.client_id, &issued.user_id, &graph_id);
-        issued
-            .scope
-            .split_whitespace()
-            .filter(|requested| {
-                // `offline_access` governs issuance rather than access to a resource, so it is
-                // not a permission the directory records.
-                crate::auth::authorize::is_oidc_scope(requested)
-                    || consented.iter().any(|granted| granted == requested)
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
+        user_token_target(
+            &directory,
+            state,
+            tenant,
+            &issued.client_id,
+            &issued.user_id,
+            &issued.scope,
+            request.scope.as_deref(),
+            // Microsoft: "If the scopes specified in this request span multiple resource server,
+            // then the Microsoft identity platform returns a token for the resource specified in
+            // the first scope."
+            MultipleResources::TakeFirst,
+        )?
     };
 
     issue_user_tokens(
@@ -337,7 +353,9 @@ async fn refresh_token(
         SignIn {
             client_id: &issued.client_id,
             user_id: &issued.user_id,
-            granted_scope: &scope,
+            target,
+            authorized_scope: &issued.scope,
+            client_auth,
             // A refreshed ID token carries no nonce; there was no fresh authorization request
             // to bind it to.
             nonce: None,
@@ -348,12 +366,98 @@ async fn refresh_token(
     .await
 }
 
-/// A signed-in user to mint tokens for: through which client, with what consent, and by which
+/// What to do when a token request's scope names more than one API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MultipleResources {
+    Refuse,
+    TakeFirst,
+}
+
+/// The API a user token is for, and the permissions the user consented to on it.
+struct UserTokenTarget {
+    resource: RequestedResource,
+    /// Consented scope values on the API, unqualified.
+    granted: Vec<String>,
+    /// Whether the sign-in asked for `offline_access`, which is what earns a refresh token.
+    offline_access: bool,
+}
+
+/// Decide which API a user token is for.
+///
+/// The token request's own `scope` wins when it names an API: Microsoft calls this "a
+/// Microsoft extension ... to allow apps to declare the resource they want the token for during
+/// token redemption", and a refresh token "can be used to request a new access token for"
+/// another API. Otherwise the first API the sign-in asked for, and Microsoft Graph when it
+/// named none. The permissions come from the consent recorded in the directory.
+#[allow(clippy::too_many_arguments)]
+fn user_token_target(
+    directory: &crate::store::Directory,
+    state: &AppState,
+    tenant: &str,
+    client_id: &str,
+    user_id: &str,
+    authorized_scope: &str,
+    requested_scope: Option<&str>,
+    multiple: MultipleResources,
+) -> Result<UserTokenTarget, OAuthFailure> {
+    let base_url = state.config.public_base_url();
+    let (authorized_oidc, authorized_named) = scopes::parse(authorized_scope);
+    let (_, requested_named) = scopes::parse(requested_scope.unwrap_or_default());
+
+    let named = if requested_named.is_empty() {
+        authorized_named
+    } else {
+        requested_named.clone()
+    };
+    let mut resources = scopes::resolve(directory, &base_url, &named)
+        .map_err(|unknown| oauth_error::invalid_resource(&unknown, tenant))?;
+    // The sign-in may have named several APIs; only the redemption's own scope must name one.
+    if resources.len() > 1 && multiple == MultipleResources::Refuse && !requested_named.is_empty() {
+        return Err(oauth_error::invalid_scope(
+            requested_scope.unwrap_or_default(),
+        ));
+    }
+    let resource = if resources.is_empty() {
+        let graph = directory
+            .graph_service_principal()
+            .ok_or_else(|| oauth_error::server_error("Microsoft Graph is not registered."))?;
+        RequestedResource {
+            principal_id: graph.id.clone(),
+            app_id: graph.app_id.clone(),
+            requested_as: None,
+            values: Vec::new(),
+        }
+    } else {
+        resources.remove(0)
+    };
+
+    let granted = directory.consented_scopes(client_id, user_id, &resource.principal_id);
+    if !requested_named.is_empty()
+        && let Some(missing) = resource
+            .named_scopes()
+            .find(|scope| !granted.contains(scope))
+    {
+        return Err(oauth_error::consent_required(&resource.qualify(missing)));
+    }
+
+    Ok(UserTokenTarget {
+        resource,
+        granted,
+        offline_access: authorized_oidc
+            .iter()
+            .any(|scope| scope == "offline_access"),
+    })
+}
+
+/// A signed-in user to mint tokens for: through which client, for which API, and by which
 /// grant the request arrived.
 struct SignIn<'a> {
     client_id: &'a str,
     user_id: &'a str,
-    granted_scope: &'a str,
+    target: UserTokenTarget,
+    /// The scope the sign-in asked for, kept on the refresh token.
+    authorized_scope: &'a str,
+    client_auth: ClientAuth,
     nonce: Option<&'a str>,
     grant: Grant,
 }
@@ -368,7 +472,9 @@ async fn issue_user_tokens(
     let SignIn {
         client_id,
         user_id,
-        granted_scope,
+        target,
+        authorized_scope,
+        client_auth,
         nonce,
         grant,
     } = sign_in;
@@ -383,32 +489,49 @@ async fn issue_user_tokens(
         (user.user_principal_name.clone(), user.display_name.clone())
     };
 
-    // `offline_access` and `openid` govern what is issued but are not resource permissions, so
-    // they do not belong in the access token's scp claim.
-    let wants_refresh = granted_scope
-        .split_whitespace()
-        .any(|scope| scope == "offline_access");
-    let resource_scopes: Vec<&str> = granted_scope
-        .split_whitespace()
-        .filter(|scope| !crate::auth::authorize::is_oidc_scope(scope))
-        .collect();
-
-    let (access_token, expires_in) = issue_user_token(
-        &state.signing_key,
-        crate::auth::token::UserTokenRequest {
-            audience: &advertised,
-            issuer: &issuer,
-            tenant_id: tenant,
-            client_id,
-            user_id,
-            user_principal_name: &user_principal_name,
-            display_name: &display_name,
-            scope: &resource_scopes.join(" "),
-            ttl_seconds: state.config.token_ttl_seconds,
-        },
-        now,
-    )
-    .map_err(|error| oauth_error::server_error(error.to_string()))?;
+    let resource = &target.resource;
+    let scope = target.granted.join(" ");
+    let (audience, signed) = if resource.is_graph() {
+        let signed = issue_user_token(
+            &state.signing_key,
+            crate::auth::token::UserTokenRequest {
+                audience: &advertised,
+                issuer: &issuer,
+                tenant_id: tenant,
+                client_id,
+                user_id,
+                user_principal_name: &user_principal_name,
+                display_name: &display_name,
+                scope: &scope,
+                ttl_seconds: state.config.token_ttl_seconds,
+            },
+            now,
+        );
+        (advertised.clone(), signed)
+    } else {
+        let signed = issue_api_token(
+            &state.signing_key,
+            ApiTokenRequest {
+                audience: &resource.app_id,
+                issuer: &issuer,
+                tenant_id: tenant,
+                client_id,
+                client_auth,
+                subject: ApiTokenSubject::User {
+                    user_id,
+                    user_principal_name: &user_principal_name,
+                    display_name: &display_name,
+                    scope: &scope,
+                },
+                roles: Vec::new(),
+                ttl_seconds: state.config.token_ttl_seconds,
+            },
+            now,
+        );
+        (resource.app_id.clone(), signed)
+    };
+    let (access_token, expires_in) =
+        signed.map_err(|error| oauth_error::server_error(error.to_string()))?;
 
     let id_token = crate::auth::token::issue_id_token(
         &state.signing_key,
@@ -447,23 +570,16 @@ async fn issue_user_tokens(
     // The ID token first, so the access token, the one a reader usually wants, ends up on top
     // of the newest-first log.
     sessions.record_issued(issued(TokenKind::Id, client_id, Vec::new()));
-    sessions.record_issued(issued(
-        TokenKind::Access,
-        &advertised,
-        resource_scopes
-            .iter()
-            .map(|scope| scope.to_string())
-            .collect(),
-    ));
+    sessions.record_issued(issued(TokenKind::Access, &audience, target.granted.clone()));
 
-    let refresh = if wants_refresh {
+    let refresh = if target.offline_access {
         let token = uuid::Uuid::new_v4().simple().to_string();
         sessions.store_refresh_token(
             token.clone(),
             crate::auth::sessions::RefreshToken {
                 client_id: client_id.to_string(),
                 user_id: user_id.to_string(),
-                scope: granted_scope.to_string(),
+                scope: authorized_scope.to_string(),
                 expires_at: crate::auth::sessions::refresh_expiry(now),
             },
         );
@@ -476,23 +592,29 @@ async fn issue_user_tokens(
         client_id = %client_id,
         user_id = %user_id,
         upn = %user_principal_name,
-        scope = %resource_scopes.join(" "),
+        audience = %audience,
+        scope = %scope,
         refresh_token = refresh.is_some(),
         "issued user tokens"
     );
 
+    let qualified: Vec<String> = target
+        .granted
+        .iter()
+        .map(|value| resource.qualify(value))
+        .collect();
     Ok(Json(TokenResponse {
         token_type: "Bearer",
         expires_in,
         ext_expires_in: expires_in,
         access_token,
-        scope: Some(resource_scopes.join(" ")),
+        scope: Some(qualified.join(" ")),
         id_token: Some(id_token),
         refresh_token: refresh,
     }))
 }
 
-/// Verify a client secret when one is presented.
+/// Verify a client secret when one is presented, and report how the client authenticated.
 ///
 /// A public client has no secret and proves itself with PKCE instead, so an absent secret is not
 /// an error here. A wrong one is.
@@ -502,13 +624,13 @@ async fn authenticate_client_if_secret_presented(
     headers: &HeaderMap,
     request: &TokenRequest,
     now: OffsetDateTime,
-) -> Result<(), OAuthFailure> {
+) -> Result<ClientAuth, OAuthFailure> {
     let secret = request
         .client_secret
         .clone()
         .or_else(|| basic_auth(headers).map(|(_, secret)| secret));
     let Some(secret) = secret else {
-        return Ok(());
+        return Ok(ClientAuth::Public);
     };
 
     let directory = state.store.read().await;
@@ -519,7 +641,7 @@ async fn authenticate_client_if_secret_presented(
         warn!(client_id, "rejected a code exchange with an invalid secret");
         return Err(oauth_error::invalid_client_secret());
     }
-    Ok(())
+    Ok(ClientAuth::Secret)
 }
 
 /// Read the client's credentials from either `client_secret_post` or `client_secret_basic`.

@@ -1113,3 +1113,223 @@ async fn a_refresh_keeps_a_permission_that_is_still_consented() {
     );
     let _ = graph;
 }
+
+/// Orders exposes `Orders.Read` and `Orders.Write` and defines the roles `Reader` and `Writer`;
+/// a public client and bob are registered to sign in to it.
+async fn orders_fixture(sim: &Sim) -> (common::Api, Fixture) {
+    let graph = sim.graph().await;
+    let orders = graph
+        .register_api(
+            "Orders",
+            "api://orders",
+            &["Reader", "Writer"],
+            &["Orders.Read", "Orders.Write"],
+            json!({ "api": { "requestedAccessTokenVersion": 2 } }),
+        )
+        .await;
+    let client = graph
+        .register_client(
+            "Orders website",
+            json!({ "publicClient": { "redirectUris": [REDIRECT_URI] } }),
+        )
+        .await;
+    let user_id = graph.create_user("bob@sim.test", "Bob Example").await;
+    (
+        orders,
+        Fixture {
+            client_id: client.app_id,
+            user_id,
+            user_principal_name: "bob@sim.test".to_string(),
+        },
+    )
+}
+
+#[tokio::test]
+async fn a_user_signs_in_to_a_registered_api() {
+    let sim = Sim::start().await;
+    let (orders, bob) = orders_fixture(&sim).await;
+
+    let tokens = complete_flow(
+        &sim,
+        &bob,
+        "openid offline_access api://orders/Orders.Read",
+        Some(VERIFIER),
+    )
+    .await;
+    let claims = common::decode_claims(tokens["access_token"].as_str().unwrap());
+
+    assert_eq!(claims["aud"], orders.app_id.as_str());
+    assert_eq!(claims["scp"], "Orders.Read");
+    assert_eq!(claims["oid"], bob.user_id.as_str());
+    assert_eq!(claims["azp"], bob.client_id.as_str());
+    // A public client proved itself with PKCE only.
+    assert_eq!(claims["azpacr"], "0");
+    assert_eq!(claims["preferred_username"], "bob@sim.test");
+    assert!(claims.get("roles").is_none(), "bob holds no role: {claims}");
+    assert!(claims.get("idtyp").is_none(), "{claims}");
+    // The response names the permission the way the client asked for it.
+    assert_eq!(tokens["scope"], "api://orders/Orders.Read");
+
+    // Consent is recorded against Orders, not Graph.
+    let graph = sim.graph().await;
+    let grants = graph.get_ok("/v1.0/oauth2PermissionGrants").await;
+    let grant = grants["value"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|grant| grant["scope"] == "Orders.Read")
+        .unwrap_or_else(|| panic!("no grant recorded: {grants}"));
+    assert_eq!(grant["resourceId"], orders.principal_id.as_str());
+}
+
+#[tokio::test]
+async fn an_unregistered_api_is_reported_back_to_the_client() {
+    let sim = Sim::start().await;
+    let (_, bob) = orders_fixture(&sim).await;
+
+    let response = browser()
+        .get(sim.url(&format!("/{}/oauth2/v2.0/authorize", sim.tenant_id)))
+        .query(&[
+            ("client_id", bob.client_id.as_str()),
+            ("response_type", "code"),
+            ("redirect_uri", REDIRECT_URI),
+            ("scope", "openid api://nothing-registered/Read"),
+            ("state", "s1"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 302);
+    let location = response.headers()["location"].to_str().unwrap();
+    assert!(location.starts_with(REDIRECT_URI), "{location}");
+    assert_eq!(extract(location, "error"), "invalid_resource");
+    assert_eq!(extract(location, "state"), "s1");
+}
+
+/// Sign bob in for `scope` and return the code, without redeeming it.
+async fn code_for(sim: &Sim, fixture: &Fixture, scope: &str) -> String {
+    let redirect = browser()
+        .post(sim.url(&format!("/{}/oauth2/v2.0/authorize", sim.tenant_id)))
+        .form(&[
+            ("client_id", fixture.client_id.as_str()),
+            ("response_type", "code"),
+            ("redirect_uri", REDIRECT_URI),
+            ("scope", scope),
+            ("user_id", fixture.user_id.as_str()),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(redirect.status(), 302);
+    extract(redirect.headers()["location"].to_str().unwrap(), "code")
+}
+
+async fn redeem(
+    sim: &Sim,
+    fixture: &Fixture,
+    code: &str,
+    scope: Option<&str>,
+) -> reqwest::Response {
+    let mut form = vec![
+        ("grant_type", "authorization_code"),
+        ("client_id", fixture.client_id.as_str()),
+        ("code", code),
+        ("redirect_uri", REDIRECT_URI),
+    ];
+    if let Some(scope) = scope {
+        form.push(("scope", scope));
+    }
+    browser()
+        .post(sim.url(&format!("/{}/oauth2/v2.0/token", sim.tenant_id)))
+        .form(&form)
+        .send()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn one_sign_in_consents_to_two_apis_and_a_refresh_switches_between_them() {
+    let sim = Sim::start().await;
+    let (orders, bob) = orders_fixture(&sim).await;
+
+    // Microsoft: for the authorize request the scope "can cover multiple resources".
+    let code = code_for(
+        &sim,
+        &bob,
+        "openid offline_access api://orders/Orders.Read User.Read",
+    )
+    .await;
+    let response = redeem(&sim, &bob, &code, None).await;
+    assert_eq!(response.status(), 200);
+    let first: serde_json::Value = response.json().await.unwrap();
+    // Without a scope at redemption, the token is for the first API named.
+    assert_eq!(
+        common::decode_claims(first["access_token"].as_str().unwrap())["aud"],
+        orders.app_id.as_str()
+    );
+
+    // Microsoft: a refresh token "can be used to request a new access token for" another API.
+    let response = browser()
+        .post(sim.url(&format!("/{}/oauth2/v2.0/token", sim.tenant_id)))
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", bob.client_id.as_str()),
+            ("refresh_token", first["refresh_token"].as_str().unwrap()),
+            ("scope", "User.Read"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let refreshed: serde_json::Value = response.json().await.unwrap();
+    let claims = common::decode_claims(refreshed["access_token"].as_str().unwrap());
+    assert_eq!(claims["aud"], sim.public_base_url.as_str());
+    assert_eq!(claims["scp"], "User.Read");
+}
+
+#[tokio::test]
+async fn a_redemption_naming_two_apis_is_refused() {
+    let sim = Sim::start().await;
+    let (_, bob) = orders_fixture(&sim).await;
+    let code = code_for(&sim, &bob, "openid api://orders/Orders.Read User.Read").await;
+
+    // Microsoft: "The scopes must all be from a single resource".
+    let response = redeem(
+        &sim,
+        &bob,
+        &code,
+        Some("api://orders/Orders.Read User.Read"),
+    )
+    .await;
+    assert_eq!(response.status(), 400);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["error"], "invalid_scope");
+}
+
+#[tokio::test]
+async fn a_redemption_naming_an_unconsented_permission_needs_consent() {
+    let sim = Sim::start().await;
+    let (_, bob) = orders_fixture(&sim).await;
+    let code = code_for(&sim, &bob, "openid api://orders/Orders.Read").await;
+
+    let response = redeem(&sim, &bob, &code, Some("api://orders/Orders.Write")).await;
+    assert_eq!(response.status(), 400);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["error"], "consent_required");
+}
+
+#[tokio::test]
+async fn an_api_scope_the_api_does_not_publish_is_not_granted() {
+    let sim = Sim::start().await;
+    let (_, bob) = orders_fixture(&sim).await;
+
+    let tokens = complete_flow(
+        &sim,
+        &bob,
+        "openid api://orders/Orders.Delete",
+        Some(VERIFIER),
+    )
+    .await;
+    let claims = common::decode_claims(tokens["access_token"].as_str().unwrap());
+    assert_eq!(claims["scp"], "", "{claims}");
+}

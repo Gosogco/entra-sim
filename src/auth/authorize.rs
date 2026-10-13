@@ -16,13 +16,11 @@ use time::OffsetDateTime;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::auth::scopes::{self, RequestedResource};
 use crate::auth::sessions::{AuthorizationCode, code_expiry};
 use crate::state::AppState;
 use crate::store::Directory;
 use crate::store::model::{MICROSOFT_GRAPH_APP_ID, OAuth2PermissionGrant};
-
-/// Scopes OpenID Connect defines, which are not permissions on a resource.
-const OIDC_SCOPES: [&str; 4] = ["openid", "profile", "email", "offline_access"];
 
 #[derive(Debug, Deserialize)]
 pub struct AuthorizeRequest {
@@ -54,6 +52,50 @@ pub fn router() -> Router<AppState> {
 /// unverified destination, so OAuth requires it be shown to the user instead.
 struct Unredirectable(String);
 
+/// A refused authorization request, either shown to the user or redirected to the client.
+///
+/// Boxed because a response is wide and this only ever travels on the failure path.
+struct Refusal(Box<Response>);
+
+impl IntoResponse for Refusal {
+    fn into_response(self) -> Response {
+        *self.0
+    }
+}
+
+impl From<Unredirectable> for Refusal {
+    fn from(failure: Unredirectable) -> Self {
+        Self(Box::new(failure.into_response()))
+    }
+}
+
+fn unredirectable(description: String) -> Refusal {
+    Unredirectable(description).into()
+}
+
+/// Report an error to the client by redirecting to its verified redirect URI.
+fn redirect_error(
+    redirect_uri: &str,
+    mode: ResponseMode,
+    state: Option<&str>,
+    error: &str,
+    description: &str,
+) -> Refusal {
+    let mut parameters = format!(
+        "error={}&error_description={}",
+        urlencode(error),
+        urlencode(description)
+    );
+    if let Some(value) = state {
+        parameters.push_str(&format!("&state={}", urlencode(value)));
+    }
+    Refusal(Box::new(found(&redirect_target(
+        redirect_uri,
+        mode,
+        &parameters,
+    ))))
+}
+
 impl IntoResponse for Unredirectable {
     fn into_response(self) -> Response {
         (
@@ -71,7 +113,7 @@ async fn show_sign_in(
     State(state): State<AppState>,
     Path(tenant): Path<String>,
     Query(request): Query<AuthorizeRequest>,
-) -> Result<Response, Unredirectable> {
+) -> Result<Response, Refusal> {
     let directory = state.store.read().await;
     let validated = validate(&state, &directory, &request)?;
 
@@ -83,7 +125,7 @@ async fn show_sign_in(
         let user = directory
             .user_by_principal_name(upn)
             .ok_or_else(|| {
-                Unredirectable(format!(
+                unredirectable(format!(
                     "The configured automatic sign-in user {upn:?} is not in the directory."
                 ))
             })?
@@ -121,13 +163,13 @@ async fn complete_sign_in(
     State(state): State<AppState>,
     Path(tenant): Path<String>,
     Form(form): Form<SignInForm>,
-) -> Result<Response, Unredirectable> {
+) -> Result<Response, Refusal> {
     let request = form.request;
     let directory = state.store.read().await;
     let validated = validate(&state, &directory, &request)?;
 
     if !directory.users.contains_key(&form.user_id) {
-        return Err(Unredirectable(
+        return Err(unredirectable(
             "The selected user is no longer in the directory.".to_string(),
         ));
     }
@@ -156,12 +198,9 @@ struct Validated {
     client_principal_id: String,
     client_display_name: String,
     redirect_uri: String,
-    /// Resource scopes the client asked for, without the OpenID Connect ones.
-    requested_resource_scopes: Vec<String>,
-    /// Whether the client asked for every already-consented permission.
-    wants_default: bool,
-    /// Whether the client asked for a refresh token.
-    offline_access: bool,
+    /// The APIs the client asked for permissions on, in the order it named them. Graph when it
+    /// named none.
+    resources: Vec<RequestedResource>,
     response_mode: ResponseMode,
 }
 
@@ -169,7 +208,7 @@ fn validate(
     state: &AppState,
     directory: &Directory,
     request: &AuthorizeRequest,
-) -> Result<Validated, Unredirectable> {
+) -> Result<Validated, Refusal> {
     let client_id = request
         .client_id
         .as_deref()
@@ -199,7 +238,7 @@ fn validate(
     // client be used to redirect a code to a destination its owner never approved.
     let registered = registered_redirect_uris(application);
     if !registered.iter().any(|uri| uri == redirect_uri) {
-        return Err(Unredirectable(format!(
+        return Err(unredirectable(format!(
             "AADSTS50011: The redirect URI {redirect_uri:?} specified in the request does not \
              match the redirect URIs configured for the application. Registered: {registered:?}."
         )));
@@ -210,13 +249,13 @@ fn validate(
     match request.response_type.as_deref() {
         Some("code") => {}
         Some(other) => {
-            return Err(Unredirectable(format!(
+            return Err(unredirectable(format!(
                 "AADSTS70005: The response_type {other:?} is not supported; this simulator \
                  implements the authorization code flow only."
             )));
         }
         None => {
-            return Err(Unredirectable(
+            return Err(unredirectable(
                 "The request is missing 'response_type'.".to_string(),
             ));
         }
@@ -230,7 +269,7 @@ fn validate(
         None | Some("query") => ResponseMode::Query,
         Some("fragment") => ResponseMode::Fragment,
         Some(other) => {
-            return Err(Unredirectable(format!(
+            return Err(unredirectable(format!(
                 "The response_mode {other:?} is not supported; use 'query' or 'fragment'."
             )));
         }
@@ -239,43 +278,47 @@ fn validate(
     if let Some(method) = request.code_challenge_method.as_deref()
         && !matches!(method, "S256" | "plain")
     {
-        return Err(Unredirectable(format!(
+        return Err(unredirectable(format!(
             "The code_challenge_method {method:?} is not supported; use 'S256' or 'plain'."
         )));
     }
 
-    let requested: Vec<&str> = request
-        .scope
-        .as_deref()
-        .unwrap_or_default()
-        .split_whitespace()
-        .collect();
-    let resource_prefix = format!("{}/", state.config.public_base_url());
-    let wants_default = requested
-        .iter()
-        .any(|scope| scope.ends_with("/.default") || *scope == ".default");
-
-    let requested_resource_scopes = requested
-        .iter()
-        .filter(|scope| !OIDC_SCOPES.contains(*scope))
-        .filter(|scope| !scope.ends_with("/.default") && **scope != ".default")
-        // A scope may be written bare or qualified by the resource it belongs to.
-        .map(|scope| {
-            scope
-                .strip_prefix(&resource_prefix)
-                .unwrap_or(scope)
-                .to_string()
-        })
-        .collect();
+    let scope = request.scope.as_deref().unwrap_or_default();
+    let (_, named) = scopes::parse(scope);
+    let mut resources = scopes::resolve(directory, &state.config.public_base_url(), &named)
+        .map_err(|unknown| {
+            // The client and redirect URI are genuine by now, so the error goes back to the
+            // client, as Entra's `invalid_resource` does.
+            redirect_error(
+                redirect_uri,
+                response_mode,
+                request.state.as_deref(),
+                "invalid_resource",
+                &format!(
+                    "AADSTS500011: The resource principal named {unknown} was not found in the \
+                     tenant named {}.",
+                    state.config.tenant_id
+                ),
+            )
+        })?;
+    if resources.is_empty()
+        && let Some(graph) = directory.graph_service_principal()
+    {
+        // A sign-in that names no API still yields an access token, for Microsoft Graph.
+        resources.push(RequestedResource {
+            principal_id: graph.id.clone(),
+            app_id: graph.app_id.clone(),
+            requested_as: None,
+            values: Vec::new(),
+        });
+    }
 
     Ok(Validated {
         client_id: client_id.to_string(),
         client_principal_id: principal.id.clone(),
         client_display_name: application.display_name.clone(),
         redirect_uri: redirect_uri.to_string(),
-        requested_resource_scopes,
-        wants_default,
-        offline_access: requested.contains(&"offline_access"),
+        resources,
         response_mode,
     })
 }
@@ -305,13 +348,7 @@ async fn issue_code(
     user_id: &str,
 ) -> Response {
     let now = OffsetDateTime::now_utc();
-    let granted = consent(state, validated, user_id).await;
-
-    let mut scope = granted;
-    if validated.offline_access {
-        // Recorded on the code so the exchange knows whether to issue a refresh token.
-        scope.push("offline_access".to_string());
-    }
+    consent(state, validated, user_id).await;
 
     let code = Uuid::new_v4().simple().to_string();
     {
@@ -323,7 +360,7 @@ async fn issue_code(
                 client_id: validated.client_id.clone(),
                 redirect_uri: validated.redirect_uri.clone(),
                 user_id: user_id.to_string(),
-                scope: scope.join(" "),
+                scope: request.scope.clone().unwrap_or_default(),
                 nonce: request.nonce.clone(),
                 code_challenge: request.code_challenge.clone(),
                 code_challenge_method: request.code_challenge_method.clone(),
@@ -335,7 +372,7 @@ async fn issue_code(
         client_id = %validated.client_id,
         user_id = %user_id,
         redirect_uri = %validated.redirect_uri,
-        scope = %scope.join(" "),
+        scope = %request.scope.as_deref().unwrap_or_default(),
         "issued an authorization code"
     );
 
@@ -380,16 +417,26 @@ fn found(location: &str) -> Response {
         .into_response()
 }
 
-/// Record the user's consent as a permission grant, and return what is now consented.
+/// Record the user's consent as a permission grant on each API the client asked for.
 ///
 /// Entra stores consent in the directory and derives the token's scopes from it, so the
 /// simulator does the same: a client cannot widen its own token by asking for more scopes than
 /// were consented, and an administrator revoking the grant narrows the next token.
-async fn consent(state: &AppState, validated: &Validated, user_id: &str) -> Vec<String> {
+async fn consent(state: &AppState, validated: &Validated, user_id: &str) {
     let mut directory = state.store.write().await;
+    for requested in &validated.resources {
+        consent_to(&mut directory, validated, requested, user_id);
+    }
+}
 
-    let Some(resource) = directory.graph_service_principal() else {
-        return Vec::new();
+fn consent_to(
+    directory: &mut Directory,
+    validated: &Validated,
+    requested: &RequestedResource,
+    user_id: &str,
+) {
+    let Some(resource) = directory.service_principals.get(&requested.principal_id) else {
+        return;
     };
     let resource_id = resource.id.clone();
     // Only permissions the resource actually publishes can be consented to.
@@ -411,15 +458,12 @@ async fn consent(state: &AppState, validated: &Validated, user_id: &str) -> Vec<
         .cloned();
 
     // `/.default` asks for everything already consented and adds nothing new.
-    if validated.wants_default {
-        return existing
-            .map(|grant| grant.scope.split_whitespace().map(str::to_string).collect())
-            .unwrap_or_default();
+    if requested.wants_default() {
+        return;
     }
 
-    let newly_requested: Vec<String> = validated
-        .requested_resource_scopes
-        .iter()
+    let newly_requested: Vec<String> = requested
+        .named_scopes()
         .filter(|scope| published.iter().any(|known| known == *scope))
         .cloned()
         .collect();
@@ -464,8 +508,6 @@ async fn consent(state: &AppState, validated: &Validated, user_id: &str) -> Vec<
                 .insert(grant.id.clone(), grant);
         }
     }
-
-    scopes
 }
 
 #[derive(Debug, Deserialize)]
@@ -501,11 +543,16 @@ fn sign_in_page(
         escape(&validated.client_display_name)
     );
 
-    if validated.requested_resource_scopes.is_empty() {
+    let permissions: Vec<String> = validated
+        .resources
+        .iter()
+        .flat_map(|resource| resource.named_scopes().map(|scope| resource.qualify(scope)))
+        .collect();
+    if permissions.is_empty() {
         body.push_str("<p class=\"muted\">No additional permissions are requested.</p>");
     } else {
         body.push_str("<p>It is requesting these permissions:</p><ul class=\"scopes\">");
-        for scope in &validated.requested_resource_scopes {
+        for scope in &permissions {
             body.push_str(&format!("<li><code>{}</code></li>", escape(scope)));
         }
         body.push_str("</ul>");
@@ -611,11 +658,6 @@ fn urlencode(value: &str) -> String {
         }
     }
     out
-}
-
-/// Exposed so the token endpoint shares the same notion of an OpenID Connect scope.
-pub fn is_oidc_scope(scope: &str) -> bool {
-    OIDC_SCOPES.contains(&scope)
 }
 
 /// The Graph resource every delegated permission in this simulator belongs to.

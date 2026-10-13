@@ -29,7 +29,8 @@ pub struct AuthorizationCode {
     /// stolen code cannot be redeemed towards a different destination.
     pub redirect_uri: String,
     pub user_id: String,
-    /// Scopes the user consented to, space separated.
+    /// The scope the sign-in asked for, space separated. The token's permissions are read from
+    /// the consent recorded in the directory when the code is redeemed.
     pub scope: String,
     pub nonce: Option<String>,
     pub code_challenge: Option<String>,
