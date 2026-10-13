@@ -910,7 +910,7 @@ async fn an_unsupported_response_mode_is_still_refused() {
     let graph = sim.graph().await;
     let fixture = fixture(&graph).await;
 
-    // form_post is left out rather than half-implemented.
+    // Entra's documented modes are query, fragment and form_post.
     let response = browser()
         .get(sim.url(&format!("/{}/oauth2/v2.0/authorize", sim.tenant_id)))
         .query(&[
@@ -918,13 +918,13 @@ async fn an_unsupported_response_mode_is_still_refused() {
             ("response_type", "code"),
             ("redirect_uri", REDIRECT_URI),
             ("scope", "openid"),
-            ("response_mode", "form_post"),
+            ("response_mode", "web_message"),
         ])
         .send()
         .await
         .unwrap();
     assert_eq!(response.status(), 400);
-    assert!(response.text().await.unwrap().contains("form_post"));
+    assert!(response.text().await.unwrap().contains("web_message"));
 }
 
 #[tokio::test]
@@ -1524,4 +1524,80 @@ async fn a_refresh_naming_a_revoked_permission_is_narrowed_not_refused() {
     let refreshed: serde_json::Value = response.json().await.unwrap();
     let claims = common::decode_claims(refreshed["access_token"].as_str().unwrap());
     assert_eq!(claims["scp"], "");
+}
+
+/// The value of a hidden field in a form_post page.
+fn form_field(page: &str, name: &str) -> String {
+    let marker = format!("name=\"{name}\" value=\"");
+    let start = page
+        .find(&marker)
+        .unwrap_or_else(|| panic!("{name} missing from {page}"))
+        + marker.len();
+    page[start..].split('"').next().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn form_post_posts_the_code_to_the_redirect_uri() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let fixture = fixture(&graph).await;
+
+    let response = browser()
+        .post(sim.url(&format!("/{}/oauth2/v2.0/authorize", sim.tenant_id)))
+        .form(&[
+            ("client_id", fixture.client_id.as_str()),
+            ("response_type", "code"),
+            ("redirect_uri", REDIRECT_URI),
+            ("scope", "openid User.Read"),
+            ("state", "s1"),
+            ("response_mode", "form_post"),
+            ("user_id", fixture.user_id.as_str()),
+        ])
+        .send()
+        .await
+        .unwrap();
+    // Microsoft: form_post "Executes a POST containing the code to your redirect URI."
+    assert_eq!(response.status(), 200);
+    let page = response.text().await.unwrap();
+    assert!(
+        page.contains(&format!(
+            "method=\"POST\" name=\"hiddenform\" action=\"{REDIRECT_URI}\""
+        )),
+        "{page}"
+    );
+    assert_eq!(form_field(&page, "state"), "s1");
+
+    let code = form_field(&page, "code");
+    let redeemed = sim
+        .token_request(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", &fixture.client_id),
+            ("code", &code),
+            ("redirect_uri", REDIRECT_URI),
+        ])
+        .await;
+    assert_eq!(redeemed.status(), 200);
+}
+
+#[tokio::test]
+async fn form_post_also_carries_errors() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let fixture = fixture(&graph).await;
+
+    let response = browser()
+        .get(sim.url(&format!("/{}/oauth2/v2.0/authorize", sim.tenant_id)))
+        .query(&[
+            ("client_id", fixture.client_id.as_str()),
+            ("response_type", "code"),
+            ("redirect_uri", REDIRECT_URI),
+            ("scope", "openid api://nothing-registered/Read"),
+            ("response_mode", "form_post"),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let page = response.text().await.unwrap();
+    assert_eq!(form_field(&page, "error"), "invalid_resource");
 }

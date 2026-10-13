@@ -81,19 +81,11 @@ fn redirect_error(
     error: &str,
     description: &str,
 ) -> Refusal {
-    let mut parameters = format!(
-        "error={}&error_description={}",
-        urlencode(error),
-        urlencode(description)
-    );
+    let mut parameters = vec![("error", error), ("error_description", description)];
     if let Some(value) = state {
-        parameters.push_str(&format!("&state={}", urlencode(value)));
+        parameters.push(("state", value));
     }
-    Refusal(Box::new(found(&redirect_target(
-        redirect_uri,
-        mode,
-        &parameters,
-    ))))
+    Refusal(Box::new(respond(redirect_uri, mode, &parameters)))
 }
 
 impl IntoResponse for Unredirectable {
@@ -190,6 +182,8 @@ enum ResponseMode {
     Query,
     /// After a `#`. The only mode msal-browser uses.
     Fragment,
+    /// In a form the browser posts to the redirect URI, for server-side web apps.
+    FormPost,
 }
 
 struct Validated {
@@ -262,15 +256,16 @@ fn validate(
     }
 
     // `fragment` is not optional to support: it is the only mode msal-browser will use, by
-    // deliberate design, because a fragment is never sent to a server. `form_post` is left out
-    // rather than half-implemented.
+    // deliberate design, because a fragment is never sent to a server.
     let response_mode = match request.response_mode.as_deref() {
         // Entra's default for the code flow.
         None | Some("query") => ResponseMode::Query,
         Some("fragment") => ResponseMode::Fragment,
+        Some("form_post") => ResponseMode::FormPost,
         Some(other) => {
             return Err(unredirectable(format!(
-                "The response_mode {other:?} is not supported; use 'query' or 'fragment'."
+                "The response_mode {other:?} is not supported; use 'query', 'fragment' or \
+                 'form_post'."
             )));
         }
     };
@@ -380,17 +375,61 @@ async fn issue_code(
     );
 
     let _ = tenant;
-    let mut parameters = format!("code={}", urlencode(&code));
+    let mut parameters = vec![("code", code.as_str())];
     // `state` is echoed verbatim; a client uses it to defend against request forgery.
     if let Some(value) = &request.state {
-        parameters.push_str(&format!("&state={}", urlencode(value)));
+        parameters.push(("state", value.as_str()));
     }
 
-    found(&redirect_target(
+    respond(
         &validated.redirect_uri,
         validated.response_mode,
         &parameters,
-    ))
+    )
+}
+
+/// Return the authorization response to the client in the requested mode.
+fn respond(redirect_uri: &str, mode: ResponseMode, parameters: &[(&str, &str)]) -> Response {
+    if mode == ResponseMode::FormPost {
+        return form_post(redirect_uri, parameters);
+    }
+    let encoded = parameters
+        .iter()
+        .map(|(name, value)| format!("{name}={}", urlencode(value)))
+        .collect::<Vec<_>>()
+        .join("&");
+    found(&redirect_target(redirect_uri, mode, &encoded))
+}
+
+/// A page that posts the parameters to the redirect URI as soon as it loads.
+///
+/// Microsoft: `form_post` "Executes a POST containing the code to your redirect URI." Entra does
+/// it with a self-submitting form, with a button for when scripts are off, and so does this.
+fn form_post(redirect_uri: &str, parameters: &[(&str, &str)]) -> Response {
+    let fields: String = parameters
+        .iter()
+        .map(|(name, value)| {
+            format!(
+                "<input type=\"hidden\" name=\"{}\" value=\"{}\" />",
+                escape(name),
+                escape(value)
+            )
+        })
+        .collect();
+    let body = format!(
+        "<html><head><title>Working...</title></head><body>\
+         <form method=\"POST\" name=\"hiddenform\" action=\"{}\">{fields}\
+         <noscript><p>Script is disabled. Click Submit to continue.</p>\
+         <input type=\"submit\" value=\"Submit\" /></noscript></form>\
+         <script>document.forms[0].submit();</script></body></html>",
+        escape(redirect_uri)
+    );
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        body,
+    )
+        .into_response()
 }
 
 /// Place the response parameters on the redirect URI, in the requested mode.
@@ -400,6 +439,8 @@ async fn issue_code(
 fn redirect_target(redirect_uri: &str, mode: ResponseMode, parameters: &str) -> String {
     match mode {
         ResponseMode::Fragment => format!("{redirect_uri}#{parameters}"),
+        // A form post carries nothing in the URL; `respond` builds the form instead.
+        ResponseMode::FormPost => redirect_uri.to_string(),
         ResponseMode::Query => {
             let separator = if redirect_uri.contains('?') { "&" } else { "?" };
             format!("{redirect_uri}{separator}{parameters}")
