@@ -232,3 +232,42 @@ async fn a_known_client_consents_for_the_api_too_and_on_behalf_of_works() {
     let body: Value = exchanged.json().await.unwrap();
     assert_eq!(scp(&body), "Inventory.Read");
 }
+
+#[tokio::test]
+async fn preauthorized_permissions_need_no_consent_and_always_appear() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let client = graph.register_public_client("Website", json!({})).await;
+    let orders = orders(&graph, json!({})).await;
+    let patched = graph
+        .patch(
+            &format!("/v1.0/applications/{}", orders.object_id),
+            &json!({ "api": {
+                "requestedAccessTokenVersion": 2,
+                "preAuthorizedApplications": [{
+                    "appId": client.app_id,
+                    "delegatedPermissionIds": [orders.scopes["Orders.Read"]]
+                }],
+                "oauth2PermissionScopes": [
+                    { "id": orders.scopes["Orders.Read"], "value": "Orders.Read",
+                      "adminConsentDisplayName": "Orders.Read",
+                      "adminConsentDescription": "Orders.Read", "isEnabled": true, "type": "User" },
+                    { "id": orders.scopes["Orders.Write"], "value": "Orders.Write",
+                      "adminConsentDisplayName": "Orders.Write",
+                      "adminConsentDescription": "Orders.Write", "isEnabled": true, "type": "User" }
+                ]
+            } }),
+        )
+        .await;
+    assert_eq!(patched.status(), 204);
+    let bob = graph.create_user("bob@sim.test", "Bob").await;
+
+    // Only Orders.Write is asked for and consented, yet "Preauthorized permissions always appear
+    // in the relevant token claims."
+    let tokens = sim
+        .sign_in_ok(&client.app_id, &bob, "openid api://orders/Orders.Write")
+        .await;
+    let mut granted: Vec<String> = scp(&tokens).split(' ').map(str::to_string).collect();
+    granted.sort();
+    assert_eq!(granted, ["Orders.Read", "Orders.Write"]);
+}

@@ -237,10 +237,50 @@ impl Directory {
             .flat_map(|grant| grant.scope.split_whitespace())
             .map(str::to_string)
             .collect();
+        scopes.extend(self.preauthorized_scopes(client_app_id, resource_id));
 
         scopes.sort();
         scopes.dedup();
         scopes
+    }
+
+    /// The delegated permissions an API grants a client without consent, through its
+    /// `api.preAuthorizedApplications`.
+    ///
+    /// Microsoft: "Resources can indicate that a given application always has permission to
+    /// receive certain scopes", and "Preauthorized permissions always appear in the relevant
+    /// token claims." The API's registration must be in this tenant for its list to be read.
+    pub fn preauthorized_scopes(&self, client_app_id: &str, resource_id: &str) -> Vec<String> {
+        let Some(resource) = self.service_principals.get(resource_id) else {
+            return Vec::new();
+        };
+        let Some(api) = self
+            .application_by_app_id(&resource.app_id)
+            .and_then(|application| application.extra.get("api"))
+        else {
+            return Vec::new();
+        };
+        let permission_ids: Vec<&str> = api
+            .get("preAuthorizedApplications")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry.get("appId").and_then(Value::as_str) == Some(client_app_id))
+            .filter_map(|entry| {
+                entry
+                    .get("delegatedPermissionIds")
+                    .or(entry.get("permissionIds"))
+            })
+            .filter_map(Value::as_array)
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        resource
+            .oauth2_permission_scopes
+            .iter()
+            .filter(|scope| permission_ids.contains(&scope.id.as_str()))
+            .filter_map(|scope| scope.value.clone())
+            .collect()
     }
 }
 
