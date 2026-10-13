@@ -139,6 +139,7 @@ pub struct Config {
         env = "ENTRA_SIM_BOOTSTRAP_APP_ROLES",
         value_delimiter = ',',
         default_values_t = [
+            String::from("AdministrativeUnit.ReadWrite.All"),
             String::from("Application.ReadWrite.All"),
             String::from("AppRoleAssignment.ReadWrite.All"),
             String::from("Directory.ReadWrite.All"),

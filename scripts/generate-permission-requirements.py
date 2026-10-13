@@ -217,6 +217,157 @@ ROUTES = [
     ("GET", "/organization/{id}", "organization-get"),
 
     ("POST", "/directoryObjects/getByIds", "directoryobject-getbyids"),
+
+    ("GET", "/users/delta", "user-delta"),
+    ("GET", "/users/delta()", "user-delta"),
+    ("GET", "/users/microsoft.graph.delta()", "user-delta"),
+    ("GET", "/groups/delta", "group-delta"),
+    ("GET", "/groups/delta()", "group-delta"),
+    ("GET", "/groups/microsoft.graph.delta()", "group-delta"),
+    ("GET", "/applications/delta", "application-delta"),
+    ("GET", "/applications/delta()", "application-delta"),
+    ("GET", "/applications/microsoft.graph.delta()", "application-delta"),
+    ("GET", "/servicePrincipals/delta", "serviceprincipal-delta"),
+    ("GET", "/servicePrincipals/delta()", "serviceprincipal-delta"),
+    ("GET", "/servicePrincipals/microsoft.graph.delta()", "serviceprincipal-delta"),
+    ("GET", "/directoryRoles/delta", "directoryrole-delta"),
+    ("GET", "/directoryRoles/delta()", "directoryrole-delta"),
+    ("GET", "/directoryRoles/microsoft.graph.delta()", "directoryrole-delta"),
+    ("GET", "/oauth2PermissionGrants/delta", "oauth2permissiongrant-delta"),
+    ("GET", "/oauth2PermissionGrants/delta()", "oauth2permissiongrant-delta"),
+    ("GET", "/oauth2PermissionGrants/microsoft.graph.delta()", "oauth2permissiongrant-delta"),
+
+    ("GET", "/identity/conditionalAccess/policies", "conditionalaccessroot-list-policies"),
+    ("POST", "/identity/conditionalAccess/policies", "conditionalaccessroot-post-policies"),
+    ("GET", "/identity/conditionalAccess/policies/{id}", "conditionalaccesspolicy-get"),
+    ("PATCH", "/identity/conditionalAccess/policies/{id}", "conditionalaccesspolicy-update"),
+    ("DELETE", "/identity/conditionalAccess/policies/{id}", "conditionalaccesspolicy-delete"),
+
+    (
+        "GET",
+        "/roleManagement/directory/roleEligibilityScheduleRequests",
+        "rbacapplication-list-roleeligibilityschedulerequests",
+    ),
+    (
+        "POST",
+        "/roleManagement/directory/roleEligibilityScheduleRequests",
+        "rbacapplication-post-roleeligibilityschedulerequests",
+    ),
+    (
+        "GET",
+        "/roleManagement/directory/roleEligibilityScheduleRequests/{id}",
+        "unifiedroleeligibilityschedulerequest-get",
+    ),
+    (
+        "POST",
+        "/roleManagement/directory/roleEligibilityScheduleRequests/{id}/cancel",
+        "unifiedroleeligibilityschedulerequest-cancel",
+    ),
+    (
+        "GET",
+        "/roleManagement/directory/roleEligibilitySchedules",
+        "rbacapplication-list-roleeligibilityschedules",
+    ),
+    (
+        "GET",
+        "/roleManagement/directory/roleEligibilitySchedules/{id}",
+        "unifiedroleeligibilityschedule-get",
+    ),
+    (
+        "GET",
+        "/roleManagement/directory/roleAssignmentScheduleRequests",
+        "rbacapplication-list-roleassignmentschedulerequests",
+    ),
+    (
+        "POST",
+        "/roleManagement/directory/roleAssignmentScheduleRequests",
+        "rbacapplication-post-roleassignmentschedulerequests",
+    ),
+    (
+        "GET",
+        "/roleManagement/directory/roleAssignmentScheduleRequests/{id}",
+        "unifiedroleassignmentschedulerequest-get",
+    ),
+    (
+        "POST",
+        "/roleManagement/directory/roleAssignmentScheduleRequests/{id}/cancel",
+        "unifiedroleassignmentschedulerequest-cancel",
+    ),
+    (
+        "GET",
+        "/roleManagement/directory/roleAssignmentSchedules",
+        "rbacapplication-list-roleassignmentschedules",
+    ),
+    (
+        "GET",
+        "/roleManagement/directory/roleAssignmentSchedules/{id}",
+        "unifiedroleassignmentschedule-get",
+    ),
+
+    ("GET", "/directory/administrativeUnits", "directory-list-administrativeunits"),
+    ("POST", "/directory/administrativeUnits", "directory-post-administrativeunits"),
+    ("GET", "/directory/administrativeUnits/{id}", "administrativeunit-get"),
+    ("PATCH", "/directory/administrativeUnits/{id}", "administrativeunit-update"),
+    ("DELETE", "/directory/administrativeUnits/{id}", "administrativeunit-delete"),
+    ("GET", "/directory/administrativeUnits/{id}/members", "administrativeunit-list-members"),
+    ("POST", "/directory/administrativeUnits/{id}/members/$ref", "administrativeunit-post-members"),
+    (
+        "DELETE",
+        "/directory/administrativeUnits/{id}/members/{member_id}/$ref",
+        "administrativeunit-delete-members",
+    ),
+    (
+        "GET",
+        "/directory/administrativeUnits/{id}/scopedRoleMembers",
+        "administrativeunit-list-scopedrolemembers",
+    ),
+    (
+        "POST",
+        "/directory/administrativeUnits/{id}/scopedRoleMembers",
+        "administrativeunit-post-scopedrolemembers",
+    ),
+    (
+        "GET",
+        "/directory/administrativeUnits/{id}/scopedRoleMembers/{membership_id}",
+        "administrativeunit-get-scopedrolemembers",
+    ),
+    (
+        "DELETE",
+        "/directory/administrativeUnits/{id}/scopedRoleMembers/{membership_id}",
+        "administrativeunit-delete-scopedrolemembers",
+    ),
+    ("GET", "/administrativeUnits", "directory-list-administrativeunits"),
+    ("POST", "/administrativeUnits", "directory-post-administrativeunits"),
+    ("GET", "/administrativeUnits/{id}", "administrativeunit-get"),
+    ("PATCH", "/administrativeUnits/{id}", "administrativeunit-update"),
+    ("DELETE", "/administrativeUnits/{id}", "administrativeunit-delete"),
+    ("GET", "/administrativeUnits/{id}/members", "administrativeunit-list-members"),
+    ("POST", "/administrativeUnits/{id}/members/$ref", "administrativeunit-post-members"),
+    (
+        "DELETE",
+        "/administrativeUnits/{id}/members/{member_id}/$ref",
+        "administrativeunit-delete-members",
+    ),
+    (
+        "GET",
+        "/administrativeUnits/{id}/scopedRoleMembers",
+        "administrativeunit-list-scopedrolemembers",
+    ),
+    (
+        "POST",
+        "/administrativeUnits/{id}/scopedRoleMembers",
+        "administrativeunit-post-scopedrolemembers",
+    ),
+    (
+        "GET",
+        "/administrativeUnits/{id}/scopedRoleMembers/{membership_id}",
+        "administrativeunit-get-scopedrolemembers",
+    ),
+    (
+        "DELETE",
+        "/administrativeUnits/{id}/scopedRoleMembers/{membership_id}",
+        "administrativeunit-delete-scopedrolemembers",
+    ),
 ]
 
 # Routes where the published Application row cannot be used as-is. Each entry needs a reason,
@@ -237,6 +388,24 @@ OVERRIDES = {
             ["Directory.Read.All"],
             ["Directory.ReadWrite.All"],
         ],
+    },
+    ("POST", "/directory/administrativeUnits/{id}/members/$ref"): {
+        "reason": (
+            "The page has a second table, for creating a new group through POST /members, "
+            "which the simulator does not serve. Adding an existing object by reference is "
+            "governed by the first table alone."
+        ),
+        "roles": [["AdministrativeUnit.ReadWrite.All"]],
+        "scopes": [["AdministrativeUnit.ReadWrite.All"]],
+    },
+    ("POST", "/administrativeUnits/{id}/members/$ref"): {
+        "reason": (
+            "The page has a second table, for creating a new group through POST /members, "
+            "which the simulator does not serve. Adding an existing object by reference is "
+            "governed by the first table alone."
+        ),
+        "roles": [["AdministrativeUnit.ReadWrite.All"]],
+        "scopes": [["AdministrativeUnit.ReadWrite.All"]],
     },
 }
 
@@ -372,6 +541,7 @@ def main():
         override = OVERRIDES.get((method, path))
         if override:
             roles = override["roles"]
+            scopes = override.get("scopes", scopes)
             origin = f"{origin} (overridden: {override['reason']})"
 
         if not roles:
