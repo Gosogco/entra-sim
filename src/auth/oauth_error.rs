@@ -329,6 +329,48 @@ pub fn device_flow(error: &'static str, code: u32, description: &str) -> OAuthFa
     }
 }
 
+/// A public client sent a secret or an assertion. Microsoft's reference: "AADSTS700025
+/// InvalidClientPublicClientWithCredential - Client is public so neither 'client_assertion' nor
+/// 'client_secret' should be presented."
+pub fn public_client_with_credential() -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::UNAUTHORIZED,
+        body: OAuthError::new(
+            "invalid_client",
+            700025,
+            "AADSTS700025: Client is public so neither 'client_assertion' nor 'client_secret' \
+             should be presented."
+                .to_string(),
+        ),
+    }
+}
+
+/// Microsoft's reference: "AADSTS50126 InvalidUserNameOrPassword - Error validating credentials
+/// due to invalid username or password."
+pub fn invalid_username_or_password() -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "invalid_grant",
+            50126,
+            "AADSTS50126: Error validating credentials due to invalid username or password."
+                .to_string(),
+        ),
+    }
+}
+
+/// Microsoft's reference: "AADSTS50057 UserDisabled - The user account is disabled."
+pub fn user_disabled() -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "invalid_grant",
+            50057,
+            "AADSTS50057: The user account is disabled.".to_string(),
+        ),
+    }
+}
+
 /// The presented grant — a code, a refresh token — is not usable.
 pub fn invalid_grant(description: impl Into<String>) -> OAuthFailure {
     OAuthFailure {

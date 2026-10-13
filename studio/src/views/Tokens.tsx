@@ -14,6 +14,7 @@ const GRANT_LABEL: Record<string, string> = {
   refresh_token: 'refresh',
   on_behalf_of: 'on behalf of',
   device_code: 'device code',
+  password: 'password',
 }
 
 /// Shown instead of the token tables when the simulator has no `/__sim__/tokens`.

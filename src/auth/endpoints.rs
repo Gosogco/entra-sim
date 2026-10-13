@@ -35,6 +35,9 @@ pub struct TokenRequest {
     pub redirect_uri: Option<String>,
     pub code_verifier: Option<String>,
     pub refresh_token: Option<String>,
+    /// The user's credentials, in the resource owner password credentials grant.
+    pub username: Option<String>,
+    pub password: Option<String>,
     pub client_assertion_type: Option<String>,
     /// A JWT signed by the client, in place of a secret.
     pub client_assertion: Option<String>,
@@ -72,7 +75,8 @@ async fn token(
     headers: HeaderMap,
     Form(request): Form<TokenRequest>,
 ) -> Result<Json<TokenResponse>, OAuthFailure> {
-    let tenant = state.config.resolve_tenant(&tenant);
+    let named_tenant = tenant;
+    let tenant = state.config.resolve_tenant(&named_tenant);
     if tenant != state.config.tenant_id {
         return Err(oauth_error::unknown_client(&tenant));
     }
@@ -83,6 +87,7 @@ async fn token(
         Some("refresh_token") => refresh_token(&state, &tenant, &headers, &request).await,
         Some(JWT_BEARER) => on_behalf_of(&state, &tenant, &headers, &request).await,
         Some(DEVICE_CODE) => device_code(&state, &tenant, &headers, &request).await,
+        Some("password") => password(&state, &tenant, &named_tenant, &headers, &request).await,
         Some(other) => Err(oauth_error::unsupported_grant_type(other)),
         None => Err(oauth_error::invalid_request(
             "AADSTS900144: The request body must contain the following parameter: 'grant_type'.",
@@ -375,6 +380,108 @@ async fn refresh_token(
             nonce: None,
             id_token: true,
             grant: Grant::RefreshToken,
+        },
+        now,
+    )
+    .await
+}
+
+/// Sign a user in with their username and password: the resource owner password credentials
+/// grant.
+///
+/// Per Microsoft's ROPC documentation: the tenant "can't be set to `common` or `consumers`, but may
+/// be set to `organizations`"; "If your app is a public client, then the `client_secret` or
+/// `client_assertion` can't be included. If the app is a confidential client, then it must be
+/// included"; "Accounts that don't have passwords can't sign in with ROPC"; a wrong password gives
+/// `invalid_grant`, and "If the scopes aren't granted, a `consent_required` error will be
+/// returned."
+async fn password(
+    state: &AppState,
+    tenant: &str,
+    named_tenant: &str,
+    headers: &HeaderMap,
+    request: &TokenRequest,
+) -> Result<Json<TokenResponse>, OAuthFailure> {
+    if matches!(named_tenant, "common" | "consumers") {
+        return Err(oauth_error::invalid_request(
+            "AADSTS90023: The grant type isn't supported on the /common or /consumers \
+             authentication contexts. Use /organizations or a tenant ID instead.",
+        ));
+    }
+    let missing = |name: &str| {
+        oauth_error::invalid_request(format!(
+            "AADSTS900144: The request body must contain the following parameter: '{name}'."
+        ))
+    };
+    let username = request
+        .username
+        .as_deref()
+        .ok_or_else(|| missing("username"))?;
+    let password = request
+        .password
+        .as_deref()
+        .ok_or_else(|| missing("password"))?;
+    let (client_id, presented) = presented_credential(headers, request)?;
+    let client_id = client_id.ok_or_else(|| missing("client_id"))?;
+    let now = OffsetDateTime::now_utc();
+
+    // Microsoft's manifest reference: when Entra "can't determine the client application type.
+    // For example, the ROPC flow ... Microsoft Entra ID interprets the application type based on
+    // the value of" isFallbackPublicClient.
+    let public = {
+        let directory = state.store.read().await;
+        let application = directory
+            .application_by_app_id(&client_id)
+            .ok_or_else(|| oauth_error::unknown_client(&client_id))?;
+        application.extra.get("isFallbackPublicClient") == Some(&serde_json::Value::Bool(true))
+    };
+    let client_auth = match (public, presented) {
+        (true, None) => ClientAuth::Public,
+        (true, Some(_)) => return Err(oauth_error::public_client_with_credential()),
+        (false, None) => return Err(oauth_error::invalid_client_credential_missing()),
+        (false, Some(presented)) => {
+            authenticate(state, tenant, &client_id, &presented, now).await?
+        }
+    };
+
+    let user_id = {
+        let directory = state.store.read().await;
+        let user = directory
+            .user_by_principal_name(username)
+            .filter(|user| user.password.as_deref() == Some(password))
+            .ok_or_else(oauth_error::invalid_username_or_password)?;
+        if !user.account_enabled {
+            return Err(oauth_error::user_disabled());
+        }
+        user.id.clone()
+    };
+
+    let scope = request.scope.as_deref().unwrap_or_default();
+    let target = {
+        let directory = state.store.read().await;
+        user_token_target(
+            &directory,
+            state,
+            tenant,
+            &client_id,
+            &user_id,
+            scope,
+            Some(scope),
+            Redemption::AuthorizationCode,
+        )?
+    };
+    issue_user_tokens(
+        state,
+        tenant,
+        SignIn {
+            client_id: &client_id,
+            user_id: &user_id,
+            target,
+            authorized_scope: scope,
+            client_auth,
+            nonce: None,
+            id_token: true,
+            grant: Grant::Password,
         },
         now,
     )

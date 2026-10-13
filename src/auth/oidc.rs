@@ -82,6 +82,7 @@ pub fn document(base_url: &str, tenant: &str) -> OpenIdConfiguration {
             "client_credentials",
             "urn:ietf:params:oauth:grant-type:jwt-bearer",
             "urn:ietf:params:oauth:grant-type:device_code",
+            "password",
         ],
         subject_types_supported: vec!["pairwise"],
         id_token_signing_alg_values_supported: vec!["RS256"],

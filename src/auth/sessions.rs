@@ -91,6 +91,8 @@ pub enum Grant {
     OnBehalfOf,
     /// `urn:ietf:params:oauth:grant-type:device_code`.
     DeviceCode,
+    /// The resource owner password credentials grant.
+    Password,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
