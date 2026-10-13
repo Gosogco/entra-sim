@@ -402,6 +402,37 @@ pub fn grant_for_another_tenant() -> OAuthFailure {
     }
 }
 
+/// A conditional access policy needs multifactor authentication this grant has not done.
+/// Microsoft's reference: "AADSTS50076 UserStrongAuthClientAuthNRequired ... the user must use
+/// multifactor authentication to access the resource. Retry with a new authorize request for the
+/// resource."
+pub fn mfa_required() -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "interaction_required",
+            50076,
+            "AADSTS50076: Due to a configuration change made by your administrator, you must use \
+             multifactor authentication to access this resource. Retry with a new authorize \
+             request for the resource."
+                .to_string(),
+        ),
+    }
+}
+
+/// A conditional access policy refuses the token, with the policy's code: AADSTS53003
+/// BlockedByConditionalAccess, or a device requirement's code.
+pub fn blocked_by_conditional_access(code: u32, description: &str) -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "invalid_grant",
+            code,
+            format!("AADSTS{code}: {description}"),
+        ),
+    }
+}
+
 /// The presented grant — a code, a refresh token — is not usable.
 pub fn invalid_grant(description: impl Into<String>) -> OAuthFailure {
     OAuthFailure {

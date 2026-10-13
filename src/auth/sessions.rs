@@ -35,6 +35,8 @@ pub struct AuthorizationCode {
     /// the consent recorded in the directory when the code is redeemed.
     pub scope: String,
     pub nonce: Option<String>,
+    /// Whether the user completed multifactor authentication in this sign-in.
+    pub mfa: bool,
     pub code_challenge: Option<String>,
     pub code_challenge_method: Option<String>,
     pub expires_at: OffsetDateTime,
@@ -47,6 +49,10 @@ pub struct RefreshToken {
     pub client_id: String,
     pub user_id: String,
     pub scope: String,
+    /// Whether the sign-in it continues completed multifactor authentication.
+    pub mfa: bool,
+    /// Whether that sign-in was in a browser, for conditional access.
+    pub browser: bool,
     pub expires_at: OffsetDateTime,
 }
 
@@ -138,7 +144,7 @@ pub struct DeviceAuthorization {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceStatus {
     Pending,
-    Approved { user_id: String },
+    Approved { user_id: String, mfa: bool },
     Declined,
 }
 
@@ -146,6 +152,8 @@ pub enum DeviceStatus {
 #[derive(Debug, Clone)]
 pub struct BrowserSession {
     pub user_id: String,
+    /// Whether the user completed multifactor authentication.
+    pub mfa: bool,
     pub expires_at: OffsetDateTime,
 }
 
@@ -224,24 +232,30 @@ impl Sessions {
     }
 
     /// Start a browser session for a user who just signed in, returning the cookie value.
-    pub fn start_browser_session(&mut self, user_id: &str, now: OffsetDateTime) -> String {
+    pub fn start_browser_session(
+        &mut self,
+        user_id: &str,
+        mfa: bool,
+        now: OffsetDateTime,
+    ) -> String {
         let id = uuid::Uuid::new_v4().simple().to_string();
         self.browser_sessions.insert(
             id.clone(),
             BrowserSession {
                 user_id: user_id.to_string(),
+                mfa,
                 expires_at: now + Duration::hours(BROWSER_SESSION_LIFETIME_HOURS),
             },
         );
         id
     }
 
-    /// The user a session cookie belongs to, if the session is still live.
-    pub fn browser_session_user(&self, id: &str, now: OffsetDateTime) -> Option<String> {
+    /// The session a cookie belongs to, if it is still live.
+    pub fn browser_session(&self, id: &str, now: OffsetDateTime) -> Option<BrowserSession> {
         self.browser_sessions
             .get(id)
             .filter(|session| session.expires_at > now)
-            .map(|session| session.user_id.clone())
+            .cloned()
     }
 
     pub fn end_browser_session(&mut self, id: &str) {
@@ -349,6 +363,7 @@ mod tests {
             user_id: "user".into(),
             scope: "openid".into(),
             nonce: None,
+            mfa: false,
             code_challenge: None,
             code_challenge_method: None,
             expires_at,
@@ -433,6 +448,8 @@ mod tests {
                 client_id: "client".into(),
                 user_id: "user".into(),
                 scope: "openid".into(),
+                mfa: false,
+                browser: true,
                 expires_at: refresh_expiry(now),
             },
         );

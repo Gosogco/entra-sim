@@ -12,6 +12,7 @@ use tracing::{info, warn};
 
 use crate::auth::claims::{self, TokenType};
 use crate::auth::client_auth::{self, Presented};
+use crate::auth::conditional_access::{self, ClientAppType};
 use crate::auth::oauth_error::{self, OAuthFailure};
 use crate::auth::scopes::{self, RequestedResource};
 use crate::auth::sessions::{Grant, IssuedToken, SubjectKind, TokenKind};
@@ -333,6 +334,8 @@ async fn authorization_code(
             client_auth,
             nonce: issued.nonce.as_deref(),
             id_token: true,
+            mfa: issued.mfa,
+            client_app_type: ClientAppType::Browser,
             grant: Grant::AuthorizationCode,
         },
         now,
@@ -408,6 +411,12 @@ async fn refresh_token(
             // to bind it to.
             nonce: None,
             id_token: true,
+            mfa: issued.mfa,
+            client_app_type: if issued.browser {
+                ClientAppType::Browser
+            } else {
+                ClientAppType::MobileAppsAndDesktopClients
+            },
             grant: Grant::RefreshToken,
         },
         now,
@@ -510,6 +519,10 @@ async fn password(
             client_auth,
             nonce: None,
             id_token: true,
+            // A password alone; Microsoft: "If users need to use multi-factor authentication
+            // (MFA) to log in to the application, they will be blocked instead."
+            mfa: false,
+            client_app_type: ClientAppType::MobileAppsAndDesktopClients,
             grant: Grant::Password,
         },
         now,
@@ -576,8 +589,9 @@ async fn device_code(
                 "User declined to consent to access the app.",
             ));
         }
-        DeviceStatus::Approved { user_id } => user_id,
+        DeviceStatus::Approved { user_id, mfa } => (user_id, mfa),
     };
+    let (user_id, mfa) = user_id;
     let client_auth =
         authenticate_if_presented(state, tenant, &details.client_id, headers, request, now).await?;
     // Single use, like an authorization code.
@@ -610,6 +624,8 @@ async fn device_code(
             client_auth,
             nonce: None,
             id_token: true,
+            mfa,
+            client_app_type: ClientAppType::MobileAppsAndDesktopClients,
             grant: Grant::DeviceCode,
         },
         now,
@@ -650,7 +666,7 @@ async fn on_behalf_of(
     let advertised = state.config.public_base_url();
 
     let client_auth = authenticate(state, tenant, &client_id, &presented, now).await?;
-    let user_id = {
+    let (user_id, mfa) = {
         let directory = state.store.read().await;
 
         let issuers = [
@@ -678,7 +694,11 @@ async fn on_behalf_of(
                 "It is an app-only token, and the on-behalf-of flow only works for users.",
             ));
         }
-        user_id
+        // The user's multifactor authentication carries over, as the incoming token records it.
+        let mfa = claims["amr"]
+            .as_array()
+            .is_some_and(|methods| methods.iter().any(|method| method == "mfa"));
+        (user_id, mfa)
     };
 
     let scope = request.scope.as_deref().unwrap_or_default();
@@ -708,6 +728,8 @@ async fn on_behalf_of(
             nonce: None,
             // Microsoft's response lists no ID token for this flow.
             id_token: false,
+            mfa,
+            client_app_type: ClientAppType::MobileAppsAndDesktopClients,
             grant: Grant::OnBehalfOf,
         },
         now,
@@ -851,6 +873,10 @@ struct SignIn<'a> {
     nonce: Option<&'a str>,
     /// Whether to issue an ID token alongside the access token.
     id_token: bool,
+    /// Whether the user completed multifactor authentication.
+    mfa: bool,
+    /// What kind of client signed in, for conditional access.
+    client_app_type: ClientAppType,
     grant: Grant,
 }
 
@@ -869,6 +895,8 @@ async fn issue_user_tokens(
         client_auth,
         nonce,
         id_token: wants_id_token,
+        mfa,
+        client_app_type,
         grant,
     } = sign_in;
     let advertised = state.config.public_base_url();
@@ -895,6 +923,27 @@ async fn issue_user_tokens(
         // A disabled account gets no tokens, whichever grant is redeemed.
         if !user.account_enabled {
             return Err(oauth_error::user_disabled());
+        }
+        // Conditional access applies to every token, not only to the sign-in: a refresh for
+        // another API, or a grant with no sign-in page, is evaluated here.
+        match conditional_access::evaluate(
+            &directory,
+            &conditional_access::Access {
+                user,
+                client_app_id: client_id,
+                resource_app_ids: std::slice::from_ref(&resource.app_id),
+                client_app_type,
+                mfa,
+            },
+        ) {
+            conditional_access::Decision::Allow => {}
+            conditional_access::Decision::RequireMfa => return Err(oauth_error::mfa_required()),
+            conditional_access::Decision::Block { code, description } => {
+                return Err(oauth_error::blocked_by_conditional_access(
+                    code,
+                    &description,
+                ));
+            }
         }
         // Microsoft: "For user tokens, this set of values contains the assigned roles of the user
         // on the target application."
@@ -931,6 +980,7 @@ async fn issue_user_tokens(
             version,
             user,
             &target.oidc,
+            mfa,
         );
         // ID tokens come from the v2.0 endpoint, the only one the simulator implements.
         let id_optional = claims::optional_claims(
@@ -939,6 +989,7 @@ async fn issue_user_tokens(
             TokenVersion::V2,
             user,
             &target.oidc,
+            mfa,
         );
         access_groups.claims.extend(access_optional.claims);
         id_groups.claims.extend(id_optional.claims);
@@ -1007,6 +1058,7 @@ async fn issue_user_tokens(
                     given_name: given_name.as_deref(),
                     family_name: family_name.as_deref(),
                     scope: &scope,
+                    mfa,
                 },
                 roles: roles.clone(),
                 extra_claims: access_groups,
@@ -1083,6 +1135,8 @@ async fn issue_user_tokens(
                 client_id: client_id.to_string(),
                 user_id: user_id.to_string(),
                 scope: authorized_scope.to_string(),
+                mfa,
+                browser: client_app_type == ClientAppType::Browser,
                 expires_at: crate::auth::sessions::refresh_expiry(now),
             },
         );

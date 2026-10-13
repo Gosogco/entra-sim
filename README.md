@@ -180,6 +180,18 @@ later sign-in by the same browser skips the page once consent is in place, and `
 `prompt=select_account`, `prompt=consent`, `prompt=login` and `login_hint` behave as they do in
 Entra. Set `--auto-sign-in-user` to skip the page in tests that cannot drive a browser.
 
+## Conditional access
+
+Policies are managed at `/identity/conditionalAccess/policies`, so `azuread_conditional_access_policy`
+works, and enabled ones are enforced when tokens are issued; report-only ones are logged. A
+policy can match users, groups, directory roles, guests, applications and client app types,
+with their exclusions. `block` refuses the sign-in with `AADSTS53003`. `mfa` adds a step to the
+sign-in page, and the token's `amr` then includes `mfa`; a grant with no page, such as the
+password grant or a refresh, answers `interaction_required` with `AADSTS50076` instead. Device
+requirements cannot be met and refuse the sign-in with Entra's codes. The simulator knows
+nothing of locations, platforms, devices or risk, so a policy limited by one of those applies only
+when it covers everything, and policies for workload identities are not enforced.
+
 ## Driving it from a test suite
 
 State is held in memory. Endpoints under `/__sim__` inspect and manage it, outside any Graph
@@ -227,7 +239,7 @@ breaks the simulator surfaces as a failing check rather than a confusing provide
 ## What it does not do
 
 - Writes are immediately readable; there is no eventual consistency to trip over.
-- Conditional access, entitlement management, administrative units, PIM and synchronization jobs
+- Entitlement management, administrative units, PIM and synchronization jobs
   are all out of scope.
 
 ## Building

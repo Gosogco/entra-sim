@@ -245,6 +245,7 @@ pub fn optional_claims(
     version: crate::store::TokenVersion,
     user: &crate::store::model::User,
     oidc_scopes: &[String],
+    mfa: bool,
 ) -> OptionalClaims {
     use crate::store::TokenVersion;
 
@@ -316,7 +317,7 @@ pub fn optional_claims(
     // amr is one of the claims "always included in v1.0 tokens, but not included in v2.0 tokens
     // unless requested".
     if v2 && asked("amr").is_some() {
-        set("amr", Some(json!(["pwd"])));
+        set("amr", Some(json!(crate::auth::token::amr(mfa))));
     }
     // xms_pl: "The user's preferred language, if set."
     if asked("xms_pl").is_some() {

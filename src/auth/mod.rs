@@ -3,6 +3,7 @@
 pub mod authorize;
 pub mod claims;
 pub mod client_auth;
+pub mod conditional_access;
 pub mod device;
 pub mod endpoints;
 pub mod keys;

@@ -1134,7 +1134,8 @@ The simulator does not support these:
 | Not supported | Effect |
 |---|---|
 | Eventual consistency | A write is readable at once. Real Entra is slower. |
-| Conditional access, PIM, entitlement management | Not present |
+| PIM, entitlement management | Not present |
+| Conditional access conditions on locations, platforms, devices and risk | A policy limited by one of these never applies |
 
 A route that the permission table does not cover is **allowed**, with a
 warning in the log. A refusal would break a client that the real service

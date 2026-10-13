@@ -218,6 +218,8 @@ pub enum ApiTokenSubject<'a> {
         family_name: Option<&'a str>,
         /// Space-separated delegated permissions on the API.
         scope: &'a str,
+        /// Whether the user completed multifactor authentication, which `amr` reports.
+        mfa: bool,
     },
 }
 
@@ -240,6 +242,12 @@ pub struct ApiTokenRequest<'a> {
     /// Claims the API's registration asks for, such as `groups`, added last.
     pub extra_claims: serde_json::Map<String, serde_json::Value>,
     pub ttl_seconds: u64,
+}
+
+/// The authentication methods of a user sign-in, as `amr` reports them: Microsoft's table gives
+/// `pwd` for a password and adds `mfa` "when the user has completed MFA".
+pub fn amr(mfa: bool) -> Vec<&'static str> {
+    if mfa { vec!["pwd", "mfa"] } else { vec!["pwd"] }
 }
 
 /// The issuer of a v1.0 token. Microsoft's v1.0 discovery document names
@@ -304,6 +312,7 @@ pub fn issue_api_token(
             given_name,
             family_name,
             scope,
+            mfa,
         } => {
             set("oid", json!(user_id));
             set("sub", json!(user_id));
@@ -312,7 +321,7 @@ pub fn issue_api_token(
                 // Microsoft lists these as v1.0 claims that v2.0 tokens leave out by default.
                 set("upn", json!(user_principal_name));
                 set("unique_name", json!(user_principal_name));
-                set("amr", json!(["pwd"]));
+                set("amr", json!(amr(mfa)));
                 if let Some(given_name) = given_name {
                     set("given_name", json!(given_name));
                 }

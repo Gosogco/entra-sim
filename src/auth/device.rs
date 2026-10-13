@@ -18,6 +18,7 @@ use tracing::info;
 use crate::auth::authorize::{
     ResponseMode, Validated, consent, escape, page, resolve_scope, unassigned,
 };
+use crate::auth::conditional_access;
 use crate::auth::oauth_error::{self, OAuthFailure};
 use crate::auth::sessions::{DeviceAuthorization, DeviceStatus};
 use crate::state::AppState;
@@ -144,6 +145,8 @@ struct VerifyForm {
     user_code: String,
     user_id: Option<String>,
     decline: Option<String>,
+    /// Present when the user completed the multifactor step.
+    mfa: Option<String>,
 }
 
 /// The verification page: check the code, then let the user choose who to sign in as, or
@@ -218,12 +221,55 @@ async fn verify(State(state): State<AppState>, Form(form): Form<VerifyForm>) -> 
     if let Some(refused) = unassigned(&state, &validated, &user_id).await {
         return refused;
     }
+    let mfa = form.mfa.is_some();
+    let decision = {
+        let directory = state.store.read().await;
+        let user = directory.users.get(&user_id).expect("checked a moment ago");
+        let resources: Vec<String> = validated
+            .resources
+            .iter()
+            .map(|resource| resource.app_id.clone())
+            .collect();
+        conditional_access::evaluate(
+            &directory,
+            &conditional_access::Access {
+                user,
+                client_app_id: &validated.client_id,
+                resource_app_ids: &resources,
+                client_app_type: conditional_access::ClientAppType::MobileAppsAndDesktopClients,
+                mfa,
+            },
+        )
+    };
+    match decision {
+        conditional_access::Decision::Allow => {}
+        conditional_access::Decision::Block { code, description } => {
+            return error_page(&format!("AADSTS{code}: {description}"));
+        }
+        conditional_access::Decision::RequireMfa => {
+            return Html(page(
+                "Approve sign-in",
+                &format!(
+                    "<p>Your organization requires more verification to sign in to \
+                     <strong>{}</strong>.</p><form method=\"post\">\
+                     <input type=\"hidden\" name=\"user_code\" value=\"{}\">\
+                     <input type=\"hidden\" name=\"user_id\" value=\"{}\">\
+                     <input type=\"hidden\" name=\"mfa\" value=\"1\">\
+                     <p><button type=\"submit\">Approve sign-in</button></p></form>",
+                    escape(&validated.client_display_name),
+                    escape(&form.user_code),
+                    escape(&user_id)
+                ),
+            ))
+            .into_response();
+        }
+    }
     consent(&state, &validated, &user_id, false).await;
     state
         .sessions
         .lock()
         .await
-        .set_device_status(&device_code, DeviceStatus::Approved { user_id });
+        .set_device_status(&device_code, DeviceStatus::Approved { user_id, mfa });
     info!(client_id = %details.client_id, "approved a device code sign-in");
     Html(page(
         "Signed in",

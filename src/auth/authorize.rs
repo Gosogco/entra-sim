@@ -16,6 +16,7 @@ use time::OffsetDateTime;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::auth::conditional_access;
 use crate::auth::scopes::{self, RequestedResource};
 use crate::auth::sessions::{AuthorizationCode, code_expiry};
 use crate::state::AppState;
@@ -136,12 +137,12 @@ async fn show_sign_in(
 
     // The user this browser is already signed in as, which single sign-on reuses.
     let signed_in = match session_cookie(&headers) {
-        Some(id) => state.sessions.lock().await.browser_session_user(&id, now),
+        Some(id) => state.sessions.lock().await.browser_session(&id, now),
         None => None,
     }
-    .filter(|user_id| {
+    .filter(|session| {
         candidates.iter().any(|(id, _, upn)| {
-            id == user_id
+            *id == session.user_id
                 // A hint naming someone else is a request for that user, not the signed-in one.
                 && request
                     .login_hint
@@ -155,7 +156,7 @@ async fn show_sign_in(
         // Microsoft: "prompt=none ... ensures that the user isn't presented with any
         // interactive prompt", with `login_required` when "a single user couldn't be found" and
         // `interaction_required` when "Another authentication step or consent is required".
-        let Some(user_id) = signed_in else {
+        let Some(session) = signed_in else {
             return Err(redirect_error(
                 &validated.redirect_uri,
                 validated.response_mode,
@@ -164,7 +165,7 @@ async fn show_sign_in(
                 "AADSTS50058: A silent sign-in request was sent but no user is signed in.",
             ));
         };
-        if !consent_satisfied(&directory, &validated, &user_id) {
+        if !consent_satisfied(&directory, &validated, &session.user_id) {
             return Err(redirect_error(
                 &validated.redirect_uri,
                 validated.response_mode,
@@ -176,7 +177,15 @@ async fn show_sign_in(
             ));
         }
         drop(directory);
-        return finish(&state, alias, &request, &validated, &user_id, false).await;
+        return finish(
+            &state,
+            alias,
+            &request,
+            &validated,
+            &session.user_id,
+            Completion::silent(session.mfa),
+        )
+        .await;
     }
 
     // `prompt=login` forces credentials and `select_account` the account picker; `consent` asks
@@ -195,18 +204,34 @@ async fn show_sign_in(
             .id
             .clone();
         drop(directory);
-        return finish(&state, alias, &request, &validated, &user, true).await;
+        return finish(
+            &state,
+            alias,
+            &request,
+            &validated,
+            &user,
+            Completion::new_session(false),
+        )
+        .await;
     }
 
     // Entra's default "is to either sign in the sole current user, show the account picker if
     // there are multiple users, or show the login page if there are no users signed in". A
     // signed-in user who has already consented is signed in again without the page.
     if !forced
-        && let Some(user_id) = signed_in
-        && consent_satisfied(&directory, &validated, &user_id)
+        && let Some(session) = signed_in
+        && consent_satisfied(&directory, &validated, &session.user_id)
     {
         drop(directory);
-        return finish(&state, alias, &request, &validated, &user_id, false).await;
+        return finish(
+            &state,
+            alias,
+            &request,
+            &validated,
+            &session.user_id,
+            Completion::existing_session(session.mfa),
+        )
+        .await;
     }
 
     let mut users = candidates;
@@ -280,6 +305,8 @@ fn session_cookie_header(value: &str, max_age_seconds: i64) -> String {
 #[derive(Debug, Deserialize)]
 pub struct SignInForm {
     user_id: String,
+    /// Present when the user completed the multifactor step.
+    mfa: Option<String>,
     #[serde(flatten)]
     request: AuthorizeRequest,
 }
@@ -300,7 +327,52 @@ async fn complete_sign_in(
     }
     drop(directory);
 
-    finish(&state, alias, &request, &validated, &form.user_id, true).await
+    finish(
+        &state,
+        alias,
+        &request,
+        &validated,
+        &form.user_id,
+        Completion::new_session(form.mfa.is_some()),
+    )
+    .await
+}
+
+/// How a sign-in reached the point of issuing a code.
+#[derive(Debug, Clone, Copy)]
+struct Completion {
+    /// Whether this sign-in starts a browser session, as opposed to reusing one.
+    start_session: bool,
+    /// Whether the user completed multifactor authentication.
+    mfa: bool,
+    /// `prompt=none`: nothing may be shown to the user.
+    silent: bool,
+}
+
+impl Completion {
+    fn new_session(mfa: bool) -> Self {
+        Self {
+            start_session: true,
+            mfa,
+            silent: false,
+        }
+    }
+
+    fn existing_session(mfa: bool) -> Self {
+        Self {
+            start_session: false,
+            mfa,
+            silent: false,
+        }
+    }
+
+    fn silent(mfa: bool) -> Self {
+        Self {
+            start_session: false,
+            mfa,
+            silent: true,
+        }
+    }
 }
 
 /// Whether a path segment is an alias that resolves to the user's own tenant at sign-in.
@@ -386,7 +458,7 @@ async fn finish(
     request: &AuthorizeRequest,
     validated: &Validated,
     user_id: &str,
-    start_session: bool,
+    completion: Completion,
 ) -> Result<Response, Refusal> {
     let mut user_tenant = None;
     for tenant in home.all_tenants() {
@@ -401,7 +473,7 @@ async fn finish(
         ));
     };
     if user_tenant.config.tenant_id == home.config.tenant_id {
-        return Ok(issue_code(home, "", request, validated, user_id, start_session).await);
+        return gate(home, request, validated, user_id, completion).await;
     }
     if !alias {
         return Err(unredirectable(format!(
@@ -501,15 +573,85 @@ async fn finish(
         oidc,
         response_mode: validated.response_mode,
     };
-    Ok(issue_code(
-        &user_tenant,
-        "",
-        request,
-        &validated,
-        user_id,
-        start_session,
-    )
-    .await)
+    gate(&user_tenant, request, &validated, user_id, completion).await
+}
+
+/// Apply conditional access, then issue the code: refuse a blocked sign-in, ask for the
+/// multifactor step a policy needs, or go ahead.
+async fn gate(
+    state: &AppState,
+    request: &AuthorizeRequest,
+    validated: &Validated,
+    user_id: &str,
+    completion: Completion,
+) -> Result<Response, Refusal> {
+    let decision = {
+        let directory = state.store.read().await;
+        let Some(user) = directory.users.get(user_id) else {
+            return Err(unredirectable(
+                "The selected user is no longer in the directory.".to_string(),
+            ));
+        };
+        let resources: Vec<String> = validated
+            .resources
+            .iter()
+            .map(|resource| resource.app_id.clone())
+            .collect();
+        conditional_access::evaluate(
+            &directory,
+            &conditional_access::Access {
+                user,
+                client_app_id: &validated.client_id,
+                resource_app_ids: &resources,
+                client_app_type: conditional_access::ClientAppType::Browser,
+                mfa: completion.mfa,
+            },
+        )
+    };
+    match decision {
+        conditional_access::Decision::Allow => Ok(issue_code(
+            state,
+            "",
+            request,
+            validated,
+            user_id,
+            completion.start_session,
+            completion.mfa,
+        )
+        .await),
+        conditional_access::Decision::Block { code, description } => {
+            Err(unredirectable(format!("AADSTS{code}: {description}")))
+        }
+        conditional_access::Decision::RequireMfa if completion.silent => Err(redirect_error(
+            &validated.redirect_uri,
+            validated.response_mode,
+            request.state.as_deref(),
+            "interaction_required",
+            "AADSTS50076: Due to a configuration change made by your administrator, you must use \
+             multifactor authentication to access this resource.",
+        )),
+        conditional_access::Decision::RequireMfa => {
+            Ok(Html(mfa_page(request, validated, user_id)).into_response())
+        }
+    }
+}
+
+/// The simulator's multifactor step: one button, which stands for whatever second factor the
+/// user would have used.
+fn mfa_page(request: &AuthorizeRequest, validated: &Validated, user_id: &str) -> String {
+    let body = format!(
+        "<p>Your organization requires more verification to sign in to <strong>{}</strong>.</p>\
+         <form method=\"post\">{}\
+         <input type=\"hidden\" name=\"user_id\" value=\"{}\">\
+         <input type=\"hidden\" name=\"mfa\" value=\"1\">\
+         <p><button type=\"submit\">Approve sign-in</button></p></form>\
+         <p class=\"muted\">Approving completes multifactor authentication for this \
+         sign-in.</p>",
+        escape(&validated.client_display_name),
+        hidden_request_fields(request),
+        escape(user_id)
+    );
+    page("Approve sign-in", &body)
 }
 
 /// What validating an authorization request established.
@@ -711,6 +853,7 @@ async fn issue_code(
     validated: &Validated,
     user_id: &str,
     start_session: bool,
+    mfa: bool,
 ) -> Response {
     let now = OffsetDateTime::now_utc();
     if let Some(refused) = unassigned(state, validated, user_id).await {
@@ -737,6 +880,7 @@ async fn issue_code(
                 user_id: user_id.to_string(),
                 scope: request.scope.clone().unwrap_or_default(),
                 nonce: request.nonce.clone(),
+                mfa,
                 code_challenge: request.code_challenge.clone(),
                 code_challenge_method: request.code_challenge_method.clone(),
                 expires_at: code_expiry(now),
@@ -768,7 +912,7 @@ async fn issue_code(
             .sessions
             .lock()
             .await
-            .start_browser_session(user_id, now);
+            .start_browser_session(user_id, mfa, now);
         if let Ok(cookie) = header::HeaderValue::from_str(&session_cookie_header(&id, 86_400)) {
             response.headers_mut().append(header::SET_COOKIE, cookie);
         }
@@ -1286,6 +1430,19 @@ fn sign_in_page(
 
     // The authorization request is carried through the form so the POST can revalidate it
     // rather than trust anything held server-side between the two requests.
+    body.push_str(&hidden_request_fields(request));
+    body.push_str("</form>");
+    body.push_str(
+        "<p class=\"muted\">Choosing a user records consent for the permissions above, the \
+         same way an administrator's consent is recorded in a real tenant.</p>",
+    );
+
+    page("Sign in", &body)
+}
+
+/// The authorization request as hidden form fields.
+fn hidden_request_fields(request: &AuthorizeRequest) -> String {
+    let mut fields = String::new();
     for (name, value) in [
         ("client_id", request.client_id.as_deref()),
         ("response_type", request.response_type.as_deref()),
@@ -1301,19 +1458,13 @@ fn sign_in_page(
         ("response_mode", request.response_mode.as_deref()),
     ] {
         if let Some(value) = value {
-            body.push_str(&format!(
+            fields.push_str(&format!(
                 "<input type=\"hidden\" name=\"{name}\" value=\"{}\">",
                 escape(value)
             ));
         }
     }
-    body.push_str("</form>");
-    body.push_str(
-        "<p class=\"muted\">Choosing a user records consent for the permissions above, the \
-         same way an administrator's consent is recorded in a real tenant.</p>",
-    );
-
-    page("Sign in", &body)
+    fields
 }
 
 /// Wrap body content in a self-contained page.
