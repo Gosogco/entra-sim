@@ -167,3 +167,11 @@ resource "azuread_conditional_access_policy" "legacy" {
     built_in_controls = ["block"]
   }
 }
+
+# The engineer may activate User Administrator through Privileged Identity Management.
+resource "azuread_directory_role_eligibility_schedule_request" "engineer" {
+  role_definition_id = "fe930be7-5e62-47db-91af-98c3a49a38b1"
+  principal_id       = azuread_user.engineer.object_id
+  directory_scope_id = "/"
+  justification      = "On call for password resets"
+}

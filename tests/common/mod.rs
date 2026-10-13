@@ -200,6 +200,15 @@ impl Sim {
         }
     }
 
+    /// A Graph client presenting `token`, such as a user's.
+    pub fn graph_as(&self, token: &str) -> Graph {
+        Graph {
+            base_url: self.base_url.clone(),
+            token: token.to_string(),
+            client: self.client.clone(),
+        }
+    }
+
     /// An authenticated client holding a bootstrap-client token, for Graph requests.
     pub async fn graph(&self) -> Graph {
         let token = self.client_credentials_token().await["access_token"]

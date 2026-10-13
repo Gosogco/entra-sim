@@ -198,8 +198,14 @@ async fn members(
     let directory = state.store.read().await;
     let role = lookup(&directory, &id).ok_or_else(|| GraphError::resource_not_found(&id))?;
 
-    let mut objects: Vec<Value> = role
-        .members
+    // A principal holding the role through an active PIM schedule is a member while it lasts.
+    let mut holders = role.members.clone();
+    for holder in directory.scheduled_role_holders(&role.role_template_id) {
+        if !holders.contains(&holder) {
+            holders.push(holder);
+        }
+    }
+    let mut objects: Vec<Value> = holders
         .iter()
         .filter_map(|member| directory.object(member).map(|(_, value)| value))
         .collect();

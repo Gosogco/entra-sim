@@ -27,6 +27,10 @@ pub struct Snapshot {
     pub oauth2_permission_grants: Vec<OAuth2PermissionGrant>,
     pub directory_roles: Vec<DirectoryRole>,
     pub conditional_access_policies: Vec<serde_json::Value>,
+    pub role_eligibility_schedule_requests: Vec<serde_json::Value>,
+    pub role_eligibility_schedules: Vec<serde_json::Value>,
+    pub role_assignment_schedule_requests: Vec<serde_json::Value>,
+    pub role_assignment_schedules: Vec<serde_json::Value>,
     /// Group membership and ownership, which are navigation properties and so are not carried
     /// on the group itself.
     pub group_links: Vec<GroupLinks>,
@@ -110,6 +114,26 @@ impl Snapshot {
             directory_roles: directory.directory_roles.values().cloned().collect(),
             conditional_access_policies: directory
                 .conditional_access_policies
+                .values()
+                .cloned()
+                .collect(),
+            role_eligibility_schedule_requests: directory
+                .role_eligibility_schedule_requests
+                .values()
+                .cloned()
+                .collect(),
+            role_eligibility_schedules: directory
+                .role_eligibility_schedules
+                .values()
+                .cloned()
+                .collect(),
+            role_assignment_schedule_requests: directory
+                .role_assignment_schedule_requests
+                .values()
+                .cloned()
+                .collect(),
+            role_assignment_schedules: directory
+                .role_assignment_schedules
                 .values()
                 .cloned()
                 .collect(),
@@ -198,6 +222,16 @@ impl Snapshot {
             conditional_access_policies: by_id(self.conditional_access_policies, |policy| {
                 policy["id"].as_str().unwrap_or_default().to_string()
             }),
+            role_eligibility_schedule_requests: by_id(
+                self.role_eligibility_schedule_requests,
+                json_id,
+            ),
+            role_eligibility_schedules: by_id(self.role_eligibility_schedules, json_id),
+            role_assignment_schedule_requests: by_id(
+                self.role_assignment_schedule_requests,
+                json_id,
+            ),
+            role_assignment_schedules: by_id(self.role_assignment_schedules, json_id),
         };
 
         // Reattach everything the entities do not carry themselves.
@@ -242,6 +276,11 @@ impl Snapshot {
 
         directory
     }
+}
+
+/// The `id` of an object kept as JSON.
+fn json_id(object: &serde_json::Value) -> String {
+    object["id"].as_str().unwrap_or_default().to_string()
 }
 
 fn by_id<T>(items: Vec<T>, key: impl Fn(&T) -> String) -> BTreeMap<String, T> {

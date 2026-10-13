@@ -18,6 +18,7 @@ pub mod directory_roles;
 pub mod error;
 pub mod groups;
 pub mod permissions_catalogue;
+pub mod role_schedules;
 pub mod service_principals;
 pub mod tenant;
 pub mod userinfo;
@@ -89,6 +90,7 @@ fn resources() -> Router<AppState> {
         )
         .merge(users::router())
         .merge(conditional_access::router())
+        .merge(role_schedules::router())
         .merge(groups::router())
         .merge(applications::router())
         .merge(service_principals::router())

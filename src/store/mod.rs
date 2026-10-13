@@ -37,6 +37,12 @@ pub struct Directory {
     pub directory_roles: BTreeMap<String, DirectoryRole>,
     /// Conditional access policies, kept as Graph's JSON.
     pub conditional_access_policies: BTreeMap<String, Value>,
+    /// Privileged Identity Management requests and schedules for directory roles, kept as
+    /// Graph's JSON. A schedule has the ID of the request that created it.
+    pub role_eligibility_schedule_requests: BTreeMap<String, Value>,
+    pub role_eligibility_schedules: BTreeMap<String, Value>,
+    pub role_assignment_schedule_requests: BTreeMap<String, Value>,
+    pub role_assignment_schedules: BTreeMap<String, Value>,
 }
 
 impl Directory {
@@ -360,7 +366,7 @@ impl Directory {
     }
 
     /// The activated directory roles the object holds, directly or through a group it is a
-    /// direct member of.
+    /// direct member of, including roles it holds through a current PIM assignment schedule.
     pub fn directory_roles_of(&self, id: &str) -> Vec<&DirectoryRole> {
         let mut holders = vec![id.to_string()];
         holders.extend(
@@ -370,7 +376,26 @@ impl Directory {
         );
         self.directory_roles
             .values()
-            .filter(|role| role.members.iter().any(|member| holders.contains(member)))
+            .filter(|role| {
+                role.members.iter().any(|member| holders.contains(member))
+                    || self
+                        .scheduled_role_holders(&role.role_template_id)
+                        .iter()
+                        .any(|holder| holders.contains(holder))
+            })
+            .collect()
+    }
+
+    /// The principals holding a directory role through a PIM assignment schedule in force now.
+    pub fn scheduled_role_holders(&self, role_template_id: &str) -> Vec<String> {
+        let now = time::OffsetDateTime::now_utc();
+        self.role_assignment_schedules
+            .values()
+            .filter(|schedule| {
+                schedule["roleDefinitionId"] == role_template_id
+                    && crate::graph::role_schedules::is_current(schedule, now)
+            })
+            .filter_map(|schedule| schedule["principalId"].as_str().map(str::to_string))
             .collect()
     }
 

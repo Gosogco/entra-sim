@@ -192,6 +192,17 @@ requirements cannot be met and refuse the sign-in with Entra's codes. The simula
 nothing of locations, platforms, devices or risk, so a policy limited by one of those applies only
 when it covers everything, and policies for workload identities are not enforced.
 
+## Privileged Identity Management
+
+Directory roles can be made eligible and activated through
+`/roleManagement/directory/roleEligibilityScheduleRequests` and
+`roleAssignmentScheduleRequests`, so `azuread_directory_role_eligibility_schedule_request` works.
+Every request completes at once, with no approval step, and the schedule it creates has the
+request's ID. An eligible user activates a role with a `selfActivate` request made with their own
+token; the role then counts in `wids`, group claims, conditional access and the role's members
+until the requested time runs out, eight hours when none is given. The schedules are listed at
+`roleEligibilitySchedules` and `roleAssignmentSchedules`.
+
 ## Driving it from a test suite
 
 State is held in memory. Endpoints under `/__sim__` inspect and manage it, outside any Graph
@@ -239,8 +250,10 @@ breaks the simulator surfaces as a failing check rather than a confusing provide
 ## What it does not do
 
 - Writes are immediately readable; there is no eventual consistency to trip over.
-- Entitlement management, administrative units, PIM and synchronization jobs
-  are all out of scope.
+- Entitlement management, administrative units and synchronization jobs are
+  all out of scope.
+- PIM requests never wait for approval, and PIM for groups and Azure resources is not
+  present.
 
 ## Building
 

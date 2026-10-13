@@ -1134,7 +1134,8 @@ The simulator does not support these:
 | Not supported | Effect |
 |---|---|
 | Eventual consistency | A write is readable at once. Real Entra is slower. |
-| PIM, entitlement management | Not present |
+| Entitlement management | Not present |
+| PIM approval, and PIM for groups | Every directory role request completes at once; group eligibility is not present |
 | Conditional access conditions on locations, platforms, devices and risk | A policy limited by one of these never applies |
 
 A route that the permission table does not cover is **allowed**, with a
