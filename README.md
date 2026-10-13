@@ -12,6 +12,10 @@ configuration only.
 - **OAuth 2.0 and OpenID Connect**: the client credentials grant, the authorization code grant
   with PKCE, and refresh tokens. Real RS256-signed JWTs, OIDC discovery, and a JWKS endpoint, so
   clients validate tokens exactly as they would in production.
+- **Tokens for your own APIs**: a client can ask for a token for any app registration by its
+  identifier URI or appId, such as `api://orders/.default`. The token carries that API's
+  delegated scopes in `scp` and the app roles the caller holds on it in `roles`, in the v1.0 or
+  v2.0 format the API asks for with `api.requestedAccessTokenVersion`.
 - **Microsoft Graph**: `/me`, users, groups with membership and ownership, applications, service
   principals, client secrets and certificates, federated identity credentials, app role
   assignments, delegated permission grants, directory roles, domains and organization. Served
@@ -144,9 +148,15 @@ browser needs in order to trust the generated certificate.
 
 ## Pointing application code at it
 
-For a client using the Azure SDKs, set `AZURE_AUTHORITY_HOST` to the simulator and request tokens
-for its base URL as the resource. For anything reading OIDC discovery, point it at
-`https://<host>/<tenant>/v2.0/.well-known/openid-configuration`.
+For a client using the Azure SDKs, set `AZURE_AUTHORITY_HOST` to the simulator. Graph tokens are
+requested as in a real tenant, with `https://graph.microsoft.com/.default` or a bare scope such as
+`User.Read`; the simulator's own base URL also names Graph, because its metadata document
+advertises it. Tokens for your own API are requested with its identifier URI or appId. For
+anything reading OIDC discovery, point it at
+`https://<host>/<tenant>/v2.0/.well-known/openid-configuration`. An API that validates v1.0 tokens
+reads `https://<host>/<tenant>/.well-known/openid-configuration` instead, as it would in Entra.
+That document gives the v1.0 issuer and the keys; the v1.0 sign-in endpoints themselves are not
+implemented.
 
 Interactive clients register their redirect URIs on the application as usual. The simulator's
 sign-in page lists the tenant's users and the permissions being requested; choosing a user both

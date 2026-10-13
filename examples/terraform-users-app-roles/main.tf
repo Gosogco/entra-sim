@@ -87,6 +87,8 @@ resource "azuread_application" "this" {
 
   display_name     = each.value.display_name
   sign_in_audience = "AzureADMyOrg"
+  # The name clients ask for a token with: api://orders/.default.
+  identifier_uris = ["api://${each.key}"]
 
   dynamic "app_role" {
     for_each = each.value.roles
@@ -109,6 +111,21 @@ resource "azuread_service_principal" "this" {
   client_id = azuread_application.this[each.key].client_id
 }
 
+# A public client that users sign in through, so token.sh can show what a user's token for
+# Orders or Inventory carries.
+resource "azuread_application" "viewer" {
+  display_name     = "Role viewer"
+  sign_in_audience = "AzureADMyOrg"
+
+  public_client {
+    redirect_uris = ["http://localhost/callback"]
+  }
+}
+
+resource "azuread_service_principal" "viewer" {
+  client_id = azuread_application.viewer.client_id
+}
+
 resource "azuread_app_role_assignment" "this" {
   for_each = local.assignments
 
@@ -126,4 +143,14 @@ output "assignments" {
       if split("/", assignment)[0] == user
     ])
   }
+}
+
+output "user_ids" {
+  description = "Object ID of each user, which token.sh signs in as."
+  value       = { for user, resource in azuread_user.this : user => resource.object_id }
+}
+
+output "viewer_client_id" {
+  description = "Client ID of the public client token.sh signs in through."
+  value       = azuread_application.viewer.client_id
 }

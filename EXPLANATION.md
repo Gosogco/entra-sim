@@ -156,10 +156,14 @@ principal.
 
 Entra has **two different** permission types. Do not mix them.
 
-| Type | Claim in the token | Who acts |
+| Type | Claim in the token | Who holds it |
 |---|---|---|
-| **App role** (application permission) | `roles` | The application, with no user |
+| **App role** | `roles` | An application with no user, or a user or group |
 | **Delegated scope** (delegated permission) | `scp` | The application, for a signed-in user |
+
+Every API defines its own app roles and scopes. Microsoft Graph is one API.
+Your own API is another. A role or scope means something only in a token for
+the API that defines it.
 
 `Application.ReadWrite.All` exists as both. The two have **different GUIDs**:
 
@@ -210,8 +214,20 @@ An app-only token has these important claims:
 }
 ```
 
-A delegated token has `scp` in place of `roles`. It also has `upn`, `name`
-and `preferred_username` for the user.
+A delegated token has `scp`. It has `roles` too when the user holds app roles
+on the API, directly or through a security group. It also has `name` and
+`preferred_username` for the user.
+
+A token for your own API has that API as its audience. The API chooses the
+token format with `api.requestedAccessTokenVersion`. Unset or `1` gives a v1.0
+token, and `2` gives a v2.0 token. The two differ:
+
+| | v1.0 | v2.0 |
+|---|---|---|
+| `iss` | `https://sts.windows.net/<tenant>/` | `https://login.microsoftonline.com/<tenant>/v2.0` |
+| `aud` | The identifier URI or appId the client asked for | The API's appId |
+| Client | `appid`, `appidacr` | `azp`, `azpacr` |
+| User | `upn`, `unique_name`, `given_name`, `family_name` | `preferred_username` |
 
 ### Flow 1. Client credentials
 
@@ -439,16 +455,20 @@ This is the client credentials flow.
 3. It compares the secret against the stored `passwordCredentials`.
 4. It also checks the start date and the end date of the credential.
 5. It finds the service principal for the same `appId`.
-6. It reads the app role assignments for that principal.
-7. It turns each `appRoleId` into a role value, with the Graph role list.
-8. It signs a token with those values in `roles`.
+6. It finds the API the `scope` names.
+7. It reads the app role assignments for that principal on that API.
+8. It turns each `appRoleId` into a role value, with the API's role list.
+9. It signs a token with those values in `roles`.
 
-Step 6 is important. The role values come from the directory, not from a
+Step 7 is important. The role values come from the directory, not from a
 stored list. An operator who deletes an assignment changes the **next**
 token. A revocation that did not do this would have no effect.
 
-The simulator refuses a `scope` for any other resource. It answers
-`400 invalid_scope`. This finds a client that points at the wrong host.
+The `scope` names the API. It can be the API's identifier URI, such as
+`api://orders/.default`, or its appId. For Graph it can be
+`https://graph.microsoft.com/.default` or the simulator's own base URL. The
+roles come from the assignments on that API only. An API that is not in the
+directory gives `400 invalid_resource` with `AADSTS500011`.
 
 ### Scenario B. A user signs in
 
@@ -471,8 +491,13 @@ Three results follow:
 - An operator can see the consent with `GET /v1.0/oauth2PermissionGrants`.
 - An operator who deletes the grant narrows the next token.
 
-The simulator also refuses a permission that Graph does not publish. An
+The simulator also refuses a permission that the API does not publish. An
 invented scope name gives no access.
+
+One sign-in can name scopes on several APIs. Consent is recorded for each.
+The code exchange gives a token for the API in its own `scope` parameter, or
+for the first API the sign-in named. A refresh token works for any API the
+user consented to.
 
 The code exchange has four checks:
 
@@ -722,8 +747,9 @@ curl -s --cacert certs/ca.pem \
   'https://localhost:8443/v1.0/users?$top=5' | jq
 ```
 
-**Note the scope.** It is the simulator's own base URL, not
-`https://graph.microsoft.com`. The simulator refuses any other resource.
+**Note the scope.** It is the simulator's own base URL, because the metadata
+document names that URL for Graph. `https://graph.microsoft.com/.default`
+works as well.
 
 ### Test 1. Terraform
 
@@ -762,7 +788,8 @@ export REQUESTS_CA_BUNDLE=$PWD/certs/ca.pem     # Python requests
 export NODE_EXTRA_CA_CERTS=$PWD/certs/ca.pem    # Node.js
 ```
 
-Then request tokens for the simulator's base URL as the resource.
+Then request Graph tokens for `https://graph.microsoft.com/.default`, and
+tokens for your own API with its identifier URI.
 
 For a client that reads OIDC discovery, give it this URL:
 
@@ -1001,7 +1028,9 @@ tokens that no client accepts.
 ```
 GET  /metadata/endpoints                                  Azure cloud metadata
 GET  /{tenant}/v2.0/.well-known/openid-configuration      OIDC discovery
+GET  /{tenant}/.well-known/openid-configuration           v1.0 discovery: issuer and keys only
 GET  /{tenant}/discovery/v2.0/keys                        JWKS
+GET  /{tenant}/discovery/keys                             JWKS, the same key
 GET  /{tenant}/oauth2/v2.0/authorize                      Sign-in page
 POST /{tenant}/oauth2/v2.0/authorize                      Choose a user
 POST /{tenant}/oauth2/v2.0/token                          All three grants
@@ -1118,27 +1147,9 @@ serves.
 | `certificate signed by unknown authority` | The client does not trust the CA | Set `SSL_CERT_FILE` to `ca.pem` |
 | `certificate signed by unknown authority` after a restart | The CA is new. The client holds the old one. | Read `ca.pem` again, or set `ENTRA_SIM_TLS_CERT` and `ENTRA_SIM_TLS_KEY` |
 | `Invalid audience` on a Graph call | `ENTRA_SIM_PUBLIC_HOST` is not the address the client uses | Make the two the same |
-| `400 invalid_scope` | The `scope` names another resource | Use `<public-host>/.default` |
+| `400 invalid_resource` | The `scope` names an API that is not in the directory | Check the identifier URI, or create the application and its service principal |
 | `403 Authorization_RequestDenied` | The token has no required permission | Add an app role assignment, or set `ENTRA_SIM_ENFORCE_PERMISSIONS=false` |
 | `404` on a `$ref` delete | The object is not in the collection | Read the collection first |
 | Terraform `plan` is not empty | The simulator does not return a property | Report it. This is a fault. |
 | The container is slow to start | It makes an RSA key | Wait for the health check |
 | `kid` changes after a restart | The key is new | Set `ENTRA_SIM_SIGNING_KEY` |
-
-### Known inconsistency
-
-The Microsoft Graph service principal has
-`https://graph.microsoft.com` in its `servicePrincipalNames`. This is correct
-data. A real tenant has the same value.
-
-But the simulator refuses a token request for that resource. It accepts only
-its own base URL. A client that has a fixed
-`https://graph.microsoft.com/.default` scope therefore fails.
-
-Three options exist. No one has made the choice yet:
-
-1. Remove the name. Nothing then names a resource the simulator refuses.
-2. Accept `https://graph.microsoft.com/.default` as another name for the
-   simulator's resource. This helps clients with a fixed scope. It needs a
-   change to the token endpoint and to the token check.
-3. Keep the behaviour. It finds a client that points at the wrong host.
