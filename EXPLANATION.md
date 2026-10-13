@@ -579,15 +579,22 @@ write tests before you set up consent.
 
 ### Scenario E. Terraform deploys an app registration
 
-`terraform/accept/` holds a working example. It makes seven resources:
+`terraform/accept/` holds a working example. It makes sixteen resources:
 
-- A user.
+- Two users.
 - A group.
 - A group membership.
 - An application, with Graph permissions named by GUID.
 - A service principal.
 - A client secret.
+- A certificate.
 - An app role assignment.
+- A report-only conditional access policy.
+- A PIM eligibility for User Administrator.
+- The User Administrator directory role.
+- An administrative unit.
+- Two administrative unit members, a user and the group.
+- A User Administrator role scoped to the administrative unit.
 
 The example works with no simulator-specific code. Only the environment
 differs from a real tenant.
