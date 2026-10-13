@@ -42,8 +42,19 @@ if ! sim_healthy; then
   exit 1
 fi
 
+# Open the studio: `open` on macOS, `xdg-open` on Linux, `explorer.exe` on WSL, which exits 1
+# even when it opens the page.
+STUDIO=http://localhost:8080/
+if command -v open > /dev/null; then
+  open "$STUDIO"
+elif command -v xdg-open > /dev/null; then
+  xdg-open "$STUDIO"
+elif command -v explorer.exe > /dev/null; then
+  explorer.exe "$STUDIO" || true
+fi
+
 echo
-echo "Open http://localhost:8080/"
+echo "The studio is at $STUDIO"
 echo "Stop it with: docker stop $CONTAINER_NAME"
 echo "Read its log with: docker run --rm -v $LOG_VOLUME:/logs debian:trixie-slim cat /logs/entra-sim.jsonl"
 echo "Empty its log with: docker volume rm $LOG_VOLUME (while it is stopped)"
