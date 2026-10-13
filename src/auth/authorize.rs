@@ -592,15 +592,26 @@ fn found(location: &str) -> Response {
         .into_response()
 }
 
-/// Refuse a user who is not assigned to the client app, or to an API the client asked for, when
-/// that application requires assignment. Entra shows this on its sign-in page rather than
-/// redirecting to the client.
+/// Refuse a disabled user, or one who is not assigned to the client app or to an API the client
+/// asked for when that application requires assignment. Entra shows this on its sign-in page
+/// rather than redirecting to the client.
 pub(crate) async fn unassigned(
     state: &AppState,
     validated: &Validated,
     user_id: &str,
 ) -> Option<Response> {
     let directory = state.store.read().await;
+    if directory
+        .users
+        .get(user_id)
+        .is_some_and(|user| !user.account_enabled)
+    {
+        // Microsoft's reference: "AADSTS50057 UserDisabled - The user account is disabled."
+        return Some(
+            Unredirectable("AADSTS50057: The user account is disabled.".to_string())
+                .into_response(),
+        );
+    }
     let applications = std::iter::once(validated.client_principal_id.as_str()).chain(
         validated
             .resources

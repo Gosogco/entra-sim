@@ -190,3 +190,37 @@ async fn an_unassigned_app_gets_no_app_only_token() {
     let allowed = sim.app_token(&billing, "api://orders/.default").await;
     assert_eq!(allowed.status(), 200);
 }
+
+#[tokio::test]
+async fn a_disabled_user_cannot_sign_in_or_refresh() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let client = graph.register_public_client("Website", json!({})).await;
+    let bob = graph.create_user("bob@sim.test", "Bob Example").await;
+    let tokens = sim
+        .sign_in_ok(&client.app_id, &bob, "openid offline_access User.Read")
+        .await;
+
+    let disabled = graph
+        .patch(
+            &format!("/v1.0/users/{bob}"),
+            &json!({ "accountEnabled": false }),
+        )
+        .await;
+    assert_eq!(disabled.status(), 204);
+
+    let response = choose_user(&sim, &client.app_id, &bob, "openid User.Read").await;
+    assert_eq!(response.status(), 400);
+    assert!(response.text().await.unwrap().contains("AADSTS50057"));
+
+    let refreshed = sim
+        .token_request(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", &client.app_id),
+            ("refresh_token", tokens["refresh_token"].as_str().unwrap()),
+        ])
+        .await;
+    assert_eq!(refreshed.status(), 400);
+    let body: Value = refreshed.json().await.unwrap();
+    assert_eq!(body["error_codes"][0], 50057);
+}

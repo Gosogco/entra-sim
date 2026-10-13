@@ -862,6 +862,10 @@ async fn issue_user_tokens(
         let user = directory.users.get(user_id).ok_or_else(|| {
             oauth_error::no_grant("AADSTS50034: The user account does not exist in the directory.")
         })?;
+        // A disabled account gets no tokens, whichever grant is redeemed.
+        if !user.account_enabled {
+            return Err(oauth_error::user_disabled());
+        }
         // Microsoft: "For user tokens, this set of values contains the assigned roles of the user
         // on the target application."
         let roles = user_roles_on(&directory, user_id, &resource.principal_id);
