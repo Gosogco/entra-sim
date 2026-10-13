@@ -146,6 +146,138 @@ fn rsa_key(der: &[u8]) -> Option<DecodingKey> {
     .ok()
 }
 
+/// The unverified claims of a JWT, for deciding how to verify it.
+pub fn peek_claims(token: &str) -> Option<Value> {
+    let payload = token.split('.').nth(1)?;
+    serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).ok()?).ok()
+}
+
+/// A federated identity credential matching an assertion, and what checking it needs.
+pub struct FederatedMatch {
+    /// The audiences the credential accepts.
+    pub audiences: Vec<String>,
+}
+
+/// Find the client's federated identity credential for an assertion's `iss`, `sub` and `aud`.
+///
+/// Microsoft: "The Federated Identity Credential issuer, subject, and audience values must
+/// case-sensitively match the corresponding issuer, subject and audience values contained in the
+/// token". A mismatch gives AADSTS70021, "No matching federated identity record found for
+/// presented assertion."
+pub fn matching_federated_credential(
+    directory: &Directory,
+    client_id: &str,
+    claims: &Value,
+) -> Result<FederatedMatch, OAuthFailure> {
+    let application = directory
+        .application_by_app_id(client_id)
+        .ok_or_else(|| oauth_error::unknown_client(client_id))?;
+    let issuer = claims["iss"].as_str().unwrap_or_default();
+    let subject = claims["sub"].as_str().unwrap_or_default();
+    let audiences: Vec<&str> = match &claims["aud"] {
+        Value::String(single) => vec![single.as_str()],
+        Value::Array(many) => many.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    application
+        .federated_identity_credentials
+        .iter()
+        .find(|credential| {
+            credential.issuer == issuer
+                && credential.subject == subject
+                && credential
+                    .audiences
+                    .iter()
+                    .any(|accepted| audiences.contains(&accepted.as_str()))
+        })
+        .map(|credential| FederatedMatch {
+            audiences: credential.audiences.clone(),
+        })
+        .ok_or_else(oauth_error::no_matching_federated_credential)
+}
+
+/// Check an external issuer's signature on a federated assertion, fetching the issuer's keys
+/// from its OpenID Connect discovery document the way Entra does.
+///
+/// Microsoft: "Only issuers that provide tokens signed using the RS256 algorithm are supported".
+pub async fn verify_external_signature(
+    http: &reqwest::Client,
+    assertion: &str,
+    issuer: &str,
+    audiences: &[String],
+) -> Result<(), OAuthFailure> {
+    let header = decode_header(assertion).map_err(|error| {
+        oauth_error::invalid_jwt(&format!("It is not a well-formed JWT: {error}."))
+    })?;
+    if header.alg != Algorithm::RS256 {
+        return Err(oauth_error::invalid_jwt(
+            "Federated identity credentials accept tokens signed with RS256 only.",
+        ));
+    }
+
+    // Microsoft's reference lists "External ID token from issuer failed signature verification"
+    // under AADSTS50027; it names no code for an issuer whose keys cannot be fetched, so that
+    // uses the same one.
+    let unreachable = |what: &str| {
+        oauth_error::invalid_jwt(&format!(
+            "The signing keys of the issuer {issuer} could not be read: {what}."
+        ))
+    };
+    let discovery: Value = http
+        .get(format!(
+            "{}/.well-known/openid-configuration",
+            issuer.trim_end_matches('/')
+        ))
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|error| unreachable(&error.to_string()))?
+        .json()
+        .await
+        .map_err(|error| unreachable(&error.to_string()))?;
+    let jwks_uri = discovery["jwks_uri"]
+        .as_str()
+        .ok_or_else(|| unreachable("the discovery document has no jwks_uri"))?;
+    let jwks: jsonwebtoken::jwk::JwkSet = http
+        .get(jwks_uri)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|error| unreachable(&error.to_string()))?
+        .json()
+        .await
+        .map_err(|error| unreachable(&error.to_string()))?;
+    let jwk = match header.kid.as_deref() {
+        Some(kid) => jwks.find(kid),
+        None => jwks.keys.first(),
+    }
+    .ok_or_else(|| unreachable("no published key matches the token's kid"))?;
+    let key = DecodingKey::from_jwk(jwk).map_err(|error| unreachable(&error.to_string()))?;
+
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.set_audience(audiences);
+    validation.set_issuer(&[issuer]);
+    validation.validate_nbf = true;
+    decode::<Value>(assertion, &key, &validation)
+        .map(|_| ())
+        .map_err(|error| {
+            oauth_error::invalid_jwt(&format!(
+                "External ID token from issuer failed verification: {error}."
+            ))
+        })
+}
+
+/// The HTTP client used to fetch external issuers' keys, shared so connections are reused.
+pub fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("building the HTTP client")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

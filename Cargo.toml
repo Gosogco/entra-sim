@@ -26,9 +26,10 @@ rand = "0.8"
 time = { version = "0.3.55", features = ["serde-well-known", "formatting", "parsing", "macros"] }
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 sha1 = "0.10"
+# Fetches an external issuer's signing keys, to check a federated identity credential.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
 base64 = "0.23.1"
 jsonwebtoken = "11.1.0"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 sha2 = "0.10"

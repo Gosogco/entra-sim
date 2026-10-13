@@ -26,6 +26,10 @@ configuration only.
 - **Permission enforcement**: each request's token is checked against the permissions Microsoft
   publishes for that endpoint, so a client missing a permission fails here the way it would
   against the real service.
+- **Client authentication**: secrets, certificate assertions, and federated identity
+  credentials. A federated assertion from an external issuer, such as a GitHub Actions token, is
+  checked against that issuer's published keys, so the simulator then makes an outbound HTTPS
+  request to the issuer.
 - **Terraform**: the `hashicorp/azuread` provider works against it unmodified.
 - **Browser clients**: cross-origin headers, and the fragment response mode MSAL requires.
 
@@ -215,8 +219,6 @@ breaks the simulator surfaces as a failing check rather than a confusing provide
 - Writes are immediately readable; there is no eventual consistency to trip over.
 - Conditional access, entitlement management, administrative units, PIM and synchronization jobs
   are all out of scope.
-- `client_assertion` is implemented for certificates registered in the application's
-  `keyCredentials`, not yet for federated identity credentials.
 
 ## Building
 

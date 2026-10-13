@@ -164,6 +164,38 @@ pub fn invalid_jwt(reason: &str) -> OAuthFailure {
     }
 }
 
+/// No federated identity credential on the client matches the assertion. Microsoft:
+/// "AADSTS70021: No matching federated identity record found for presented assertion."
+pub fn no_matching_federated_credential() -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "invalid_request",
+            70021,
+            "AADSTS70021: No matching federated identity record found for presented assertion."
+                .to_string(),
+        ),
+    }
+}
+
+/// An Entra-issued token that is not app-only, presented as a federated assertion. Microsoft's
+/// reference: "AADSTS700229 ForbiddenTokenType- Only app-only tokens can be used as Federated
+/// Identity Credentials for Microsoft Entra issuer."
+pub fn forbidden_token_type() -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "invalid_request",
+            700229,
+            "AADSTS700229: ForbiddenTokenType- Only app-only tokens can be used as Federated \
+             Identity Credentials for Microsoft Entra issuer. Use an app-only access token \
+             (generated during a client credentials flow) instead of a user-delegated access \
+             token (representing a request coming from a user context)."
+                .to_string(),
+        ),
+    }
+}
+
 /// The requested scope does not name a resource the simulator serves.
 pub fn invalid_scope(scope: &str) -> OAuthFailure {
     OAuthFailure {

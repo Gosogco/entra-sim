@@ -104,12 +104,12 @@ async fn client_credentials(
 
     let advertised = state.config.public_base_url();
     let now = OffsetDateTime::now_utc();
+    let client_auth = authenticate(state, tenant, &client_id, &presented, now).await?;
     let directory = state.store.read().await;
 
     let Some(application) = directory.application_by_app_id(&client_id) else {
         return Err(oauth_error::unknown_client(&client_id));
     };
-    let client_auth = authenticate(state, &directory, tenant, &client_id, &presented, now)?;
 
     // The token represents the service principal, not the application registration.
     let Some(principal) = directory.service_principal_by_app_id(&client_id) else {
@@ -410,12 +410,9 @@ async fn on_behalf_of(
     let now = OffsetDateTime::now_utc();
     let advertised = state.config.public_base_url();
 
-    let (user_id, client_auth) = {
+    let client_auth = authenticate(state, tenant, &client_id, &presented, now).await?;
+    let user_id = {
         let directory = state.store.read().await;
-        if directory.application_by_app_id(&client_id).is_none() {
-            return Err(oauth_error::unknown_client(&client_id));
-        }
-        let client_auth = authenticate(state, &directory, tenant, &client_id, &presented, now)?;
 
         let issuers = [
             format!("{advertised}/{tenant}/v2.0"),
@@ -442,7 +439,7 @@ async fn on_behalf_of(
                 "It is an app-only token, and the on-behalf-of flow only works for users.",
             ));
         }
-        (user_id, client_auth)
+        user_id
     };
 
     let scope = request.scope.as_deref().unwrap_or_default();
@@ -903,21 +900,26 @@ async fn authenticate_if_presented(
     let Some(presented) = presented else {
         return Ok(ClientAuth::Public);
     };
-    let directory = state.store.read().await;
-    authenticate(state, &directory, tenant, client_id, &presented, now)
+    authenticate(state, tenant, client_id, &presented, now).await
 }
 
 /// Check a presented credential against the client's registration.
-fn authenticate(
+///
+/// An assertion whose issuer is the client itself is signed with one of its certificates; any
+/// other issuer is matched against its federated identity credentials.
+async fn authenticate(
     state: &AppState,
-    directory: &crate::store::Directory,
     tenant: &str,
     client_id: &str,
     presented: &Presented,
     now: OffsetDateTime,
 ) -> Result<ClientAuth, OAuthFailure> {
-    match presented {
+    let assertion = match presented {
         Presented::Secret(secret) => {
+            let directory = state.store.read().await;
+            if directory.application_by_app_id(client_id).is_none() {
+                return Err(oauth_error::unknown_client(client_id));
+            }
             if directory
                 .matching_credential(client_id, secret, now)
                 .is_none()
@@ -925,19 +927,60 @@ fn authenticate(
                 warn!(client_id, "rejected a token request with an invalid secret");
                 return Err(oauth_error::invalid_client_secret());
             }
-            Ok(ClientAuth::Secret)
+            return Ok(ClientAuth::Secret);
         }
-        Presented::Assertion(assertion) => {
-            client_auth::verify_certificate_assertion(
-                directory,
-                client_id,
-                assertion,
-                &token_endpoint_urls(state, tenant),
-                now,
-            )?;
-            Ok(ClientAuth::Certificate)
-        }
+        Presented::Assertion(assertion) => assertion,
+    };
+
+    let claims = client_auth::peek_claims(assertion)
+        .ok_or_else(|| oauth_error::invalid_jwt("The assertion is not a well-formed JWT."))?;
+    let issuer = claims["iss"].as_str().unwrap_or_default().to_string();
+    if issuer == client_id {
+        let directory = state.store.read().await;
+        client_auth::verify_certificate_assertion(
+            &directory,
+            client_id,
+            assertion,
+            &token_endpoint_urls(state, tenant),
+            now,
+        )?;
+        return Ok(ClientAuth::Certificate);
     }
+
+    // The lock is released before any network call.
+    let federated = {
+        let directory = state.store.read().await;
+        client_auth::matching_federated_credential(&directory, client_id, &claims)?
+    };
+    let base = state.config.public_base_url();
+    let own_issuers = [
+        format!("{base}/{tenant}/v2.0"),
+        crate::auth::token::v1_issuer(tenant),
+    ];
+    if own_issuers.contains(&issuer) {
+        // A token this simulator issued. Microsoft: "Only app-only tokens can be used as
+        // Federated Identity Credentials for Microsoft Entra issuer."
+        let verified =
+            crate::auth::token::decode_issued(&state.signing_key, assertion, &own_issuers)
+                .map_err(|error| {
+                    oauth_error::invalid_jwt(&format!("The assertion is not valid: {error}."))
+                })?;
+        if verified["idtyp"] != "app" {
+            return Err(oauth_error::forbidden_token_type());
+        }
+    } else {
+        client_auth::verify_external_signature(
+            client_auth::http_client(),
+            assertion,
+            &issuer,
+            &federated.audiences,
+        )
+        .await?;
+    }
+    // Microsoft documents azpacr values for a public client, a secret and a certificate only. A
+    // federated assertion is an asymmetrically signed client assertion like a certificate's, so
+    // it is reported the same way.
+    Ok(ClientAuth::Certificate)
 }
 
 /// The token endpoint URLs a client assertion's `aud` may name: this tenant's, under any of the
