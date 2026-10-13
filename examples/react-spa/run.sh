@@ -23,14 +23,29 @@ if [ ! -d node_modules ]; then
 fi
 
 # The sign-in fails silently until the browser accepts the simulator's certificate, so open its
-# HTTPS address for the user to accept.
-open https://localhost:8443/__sim__/health
+# HTTPS address for the user to accept: `open` on macOS, `xdg-open` on Linux, `explorer.exe` on
+# WSL, which exits 1 even when it opens the page.
+HEALTH=https://localhost:8443/__sim__/health
+OPENED=yes
+if command -v open > /dev/null; then
+  open "$HEALTH"
+elif command -v xdg-open > /dev/null; then
+  xdg-open "$HEALTH"
+elif command -v explorer.exe > /dev/null; then
+  explorer.exe "$HEALTH" || true
+else
+  OPENED=no
+fi
 
+echo
+if [ "$OPENED" = yes ]; then
+  echo "A browser window opened at $HEALTH."
+else
+  echo "Open $HEALTH in your browser."
+fi
 cat <<'MESSAGE'
-
-A browser window opened at https://localhost:8443/__sim__/health. If it shows a certificate
-warning, choose Advanced, then Proceed. In Chrome, if there is no Proceed link, type
-thisisunsafe on that page.
+If it shows a certificate warning, choose Advanced, then Proceed. In Chrome, if there is no
+Proceed link, type thisisunsafe on that page.
 
 Then open http://localhost:5173/ and sign in as alice@example.test.
 
