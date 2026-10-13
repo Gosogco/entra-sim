@@ -310,10 +310,16 @@
         "Group-NestingSupport.ReadWrite.All"
       ],
       [
+        "Group.ReadBasic.All"
+      ],
+      [
         "Directory.Read.All"
       ],
       [
         "Directory.ReadWrite.All"
+      ],
+      [
+        "Group-PreferredDataLocation.ReadWrite.All"
       ],
       [
         "Group.ManageProtection.All"
@@ -333,10 +339,16 @@
         "Group-NestingSupport.ReadWrite.All"
       ],
       [
+        "Group.ReadBasic.All"
+      ],
+      [
         "Directory.Read.All"
       ],
       [
         "Directory.ReadWrite.All"
+      ],
+      [
+        "Group-PreferredDataLocation.ReadWrite.All"
       ],
       [
         "Group.ManageProtection.All"
@@ -364,6 +376,9 @@
         "Directory.ReadWrite.All"
       ],
       [
+        "Group-PreferredDataLocation.ReadWrite.All"
+      ],
+      [
         "Group.ReadWrite.All"
       ]
     ],
@@ -373,6 +388,9 @@
       ],
       [
         "Directory.ReadWrite.All"
+      ],
+      [
+        "Group-PreferredDataLocation.ReadWrite.All"
       ]
     ],
     "source": "includes/permissions/group-post-groups-permissions.md"
@@ -391,6 +409,9 @@
         "Directory.ReadWrite.All"
       ],
       [
+        "Group-PreferredDataLocation.ReadWrite.All"
+      ],
+      [
         "Group-XTenantIdentitySync.Read.All"
       ],
       [
@@ -398,6 +419,9 @@
       ],
       [
         "Group.Read.All"
+      ],
+      [
+        "Group.ReadBasic.All"
       ],
       [
         "Group.ReadWrite.All"
@@ -417,6 +441,9 @@
         "Directory.ReadWrite.All"
       ],
       [
+        "Group-PreferredDataLocation.ReadWrite.All"
+      ],
+      [
         "Group-XTenantIdentitySync.Read.All"
       ],
       [
@@ -424,6 +451,9 @@
       ],
       [
         "Group.Read.All"
+      ],
+      [
+        "Group.ReadBasic.All"
       ],
       [
         "Group.ReadWrite.All"
@@ -445,6 +475,9 @@
         "Directory.ReadWrite.All"
       ],
       [
+        "Group-PreferredDataLocation.ReadWrite.All"
+      ],
+      [
         "Group.ManageProtection.All"
       ],
       [
@@ -457,6 +490,9 @@
       ],
       [
         "Directory.ReadWrite.All"
+      ],
+      [
+        "Group-PreferredDataLocation.ReadWrite.All"
       ],
       [
         "Group.ManageProtection.All"
@@ -478,6 +514,9 @@
         "Directory.ReadWrite.All"
       ],
       [
+        "Group-PreferredDataLocation.ReadWrite.All"
+      ],
+      [
         "Group.ManageProtection.All"
       ],
       [
@@ -490,6 +529,9 @@
       ],
       [
         "Directory.ReadWrite.All"
+      ],
+      [
+        "Group-PreferredDataLocation.ReadWrite.All"
       ],
       [
         "Group.ManageProtection.All"
@@ -520,7 +562,7 @@
     "path": "/groups/{id}/members",
     "roles": [
       [
-        "GroupMember.Read.All"
+        "GroupMember.ReadBasic.All"
       ],
       [
         "Directory.Read.All"
@@ -529,7 +571,13 @@
         "Group.Read.All"
       ],
       [
+        "Group.ReadBasic.All"
+      ],
+      [
         "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.Read.All"
       ],
       [
         "GroupMember.ReadWrite.All"
@@ -537,7 +585,7 @@
     ],
     "scopes": [
       [
-        "GroupMember.Read.All"
+        "GroupMember.ReadBasic.All"
       ],
       [
         "Directory.Read.All"
@@ -546,7 +594,13 @@
         "Group.Read.All"
       ],
       [
+        "Group.ReadBasic.All"
+      ],
+      [
         "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.Read.All"
       ],
       [
         "GroupMember.ReadWrite.All"
@@ -559,7 +613,7 @@
     "path": "/groups/{id}/members/$ref",
     "roles": [
       [
-        "GroupMember.Read.All"
+        "GroupMember.ReadBasic.All"
       ],
       [
         "Directory.Read.All"
@@ -568,7 +622,13 @@
         "Group.Read.All"
       ],
       [
+        "Group.ReadBasic.All"
+      ],
+      [
         "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.Read.All"
       ],
       [
         "GroupMember.ReadWrite.All"
@@ -576,7 +636,7 @@
     ],
     "scopes": [
       [
-        "GroupMember.Read.All"
+        "GroupMember.ReadBasic.All"
       ],
       [
         "Directory.Read.All"
@@ -585,7 +645,13 @@
         "Group.Read.All"
       ],
       [
+        "Group.ReadBasic.All"
+      ],
+      [
         "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.Read.All"
       ],
       [
         "GroupMember.ReadWrite.All"
@@ -784,7 +850,7 @@
     "path": "/groups/{id}/transitiveMembers",
     "roles": [
       [
-        "GroupMember.Read.All"
+        "GroupMember.ReadBasic.All"
       ],
       [
         "Directory.Read.All"
@@ -793,7 +859,13 @@
         "Group.Read.All"
       ],
       [
+        "Group.ReadBasic.All"
+      ],
+      [
         "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.Read.All"
       ],
       [
         "GroupMember.ReadWrite.All"
@@ -801,7 +873,7 @@
     ],
     "scopes": [
       [
-        "GroupMember.Read.All"
+        "GroupMember.ReadBasic.All"
       ],
       [
         "Directory.Read.All"
@@ -810,7 +882,13 @@
         "Group.Read.All"
       ],
       [
+        "Group.ReadBasic.All"
+      ],
+      [
         "Group.ReadWrite.All"
+      ],
+      [
+        "GroupMember.Read.All"
       ],
       [
         "GroupMember.ReadWrite.All"
@@ -823,7 +901,7 @@
     "path": "/groups/{id}/memberOf",
     "roles": [
       [
-        "GroupMember.Read.All"
+        "GroupMember.ReadBasic.All"
       ],
       [
         "Directory.Read.All"
@@ -833,11 +911,17 @@
       ],
       [
         "Group.Read.All"
+      ],
+      [
+        "Group.ReadBasic.All"
+      ],
+      [
+        "GroupMember.Read.All"
       ]
     ],
     "scopes": [
       [
-        "GroupMember.Read.All"
+        "GroupMember.ReadBasic.All"
       ],
       [
         "Directory.Read.All"
@@ -847,6 +931,12 @@
       ],
       [
         "Group.Read.All"
+      ],
+      [
+        "Group.ReadBasic.All"
+      ],
+      [
+        "GroupMember.Read.All"
       ]
     ],
     "source": "includes/permissions/group-list-memberof-permissions.md"
@@ -1387,6 +1477,9 @@
         "Application.ReadWrite.OwnedBy"
       ],
       [
+        "AgentIdentity.ReadWrite.All"
+      ],
+      [
         "Application.ReadWrite.All"
       ],
       [
@@ -1396,6 +1489,9 @@
     "scopes": [
       [
         "Application.ReadWrite.All"
+      ],
+      [
+        "AgentIdentity.ReadWrite.All"
       ],
       [
         "Directory.ReadWrite.All"
@@ -1411,6 +1507,9 @@
         "Application.ReadWrite.OwnedBy"
       ],
       [
+        "AgentIdentity.ReadWrite.All"
+      ],
+      [
         "Application.ReadWrite.All"
       ],
       [
@@ -1420,6 +1519,9 @@
     "scopes": [
       [
         "Application.ReadWrite.All"
+      ],
+      [
+        "AgentIdentity.ReadWrite.All"
       ],
       [
         "Directory.ReadWrite.All"
