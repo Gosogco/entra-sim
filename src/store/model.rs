@@ -249,6 +249,9 @@ pub struct KeyCredential {
     pub usage: String,
     /// Base64 DER certificate.
     pub key: Option<String>,
+    /// Base64 certificate thumbprint, when the client supplied one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_key_identifier: Option<String>,
     #[serde(with = "rfc3339")]
     pub start_date_time: OffsetDateTime,
     #[serde(with = "rfc3339")]

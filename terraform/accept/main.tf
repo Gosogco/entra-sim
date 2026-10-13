@@ -92,6 +92,36 @@ resource "azuread_application_password" "deployer" {
   display_name   = "terraform-managed"
 }
 
+# A certificate credential. The provider adds it by writing the application's whole
+# keyCredentials list back, including the application's own id. The certificate is a
+# self-signed one made for this test; its private key was never kept.
+resource "azuread_application_certificate" "deployer" {
+  application_id = azuread_application.deployer.id
+  type           = "AsymmetricX509Cert"
+  value          = <<-PEM
+    -----BEGIN CERTIFICATE-----
+    MIIDKzCCAhOgAwIBAgIUUlkkontG+G0j4nqFRqVS1E8hWugwDQYJKoZIhvcNAQEL
+    BQAwJDEiMCAGA1UEAwwZZW50cmEtc2ltIGFjY2VwdGFuY2UgdGVzdDAgFw0yNjEw
+    MTMxOTA2MjlaGA8yMTI2MDkxOTE5MDYyOVowJDEiMCAGA1UEAwwZZW50cmEtc2lt
+    IGFjY2VwdGFuY2UgdGVzdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEB
+    AKDjTe0cjaio/D8vVsT6IfolwIFrCm1ohdz3OQKmkib3v+VdDPO3FioSBaLLOrys
+    mgcuUX1xY/VAkAuL5NlWxmYi/nsLmEdMSKJoopSq3m+i3S28NmHWiYXJIUsPOced
+    SY1g1GqDKFeTssYKmp2JRy44d6fQEClJSokk2xDdFBkSyVaSKjIOws0NJ8B/XQQA
+    48lUPiuHpTi5VPLFFZMjsisPjVdfPuryeYOzAPlEm8M7/yDfHqAl3kncmDnuUGzQ
+    GLrJg1kZLf3Jy9ch/k9N95riiE5L26C6OJbz1SqH/vAGW7Y1MD/99u3P2aYzTXkO
+    p/Htz8B0QUbt4uiydn+8zQkCAwEAAaNTMFEwHQYDVR0OBBYEFKyY9pTYvsqjcUF/
+    vn7MoxyVJyyzMB8GA1UdIwQYMBaAFKyY9pTYvsqjcUF/vn7MoxyVJyyzMA8GA1Ud
+    EwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBABkrT/Wbb4/8epNqE7eSrG8q
+    dF9kxyUFQJj70VhxlaD7nCjHXkOposY4Ztt7vIWUttH/ZRz2cDAqV6kd3HpkbfAx
+    261kkZsU2eXla9uxA9TyOlM8r7QY7ayTn/emhJs158R/9so99m0RwpHA45nQzOgt
+    VbF7eoVTom6OuwYsuSFzGbySvSDkFq8x18Gxrv+tmpy2tz59bEGd9Al0g2CQKgAJ
+    nIFA+h1NBPhQAtUNLkZlDp52pcxTKGFiewVIVgfJyUjI5A82+JDUsVEAHbizJ/zC
+    gC9LNFwfHhAjt2Lg3dxxdXVxZLDoXCkoySUqB65i6YvhGplrMACcs+aPRWxriFg=
+    -----END CERTIFICATE-----
+  PEM
+  end_date       = "2099-01-01T00:00:00Z"
+}
+
 # Granting the permission the application asked for, which is what puts a value in the roles
 # claim of a token issued to this principal.
 resource "azuread_app_role_assignment" "deployer_graph" {

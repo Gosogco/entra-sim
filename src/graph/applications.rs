@@ -204,15 +204,69 @@ async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Read a `keyCredentials` list written by a client.
+///
+/// An entry that names an existing `keyId` without its `key` keeps the stored certificate, since
+/// a client that read the list back may not have the key to send.
+fn key_credentials(
+    value: &Value,
+    existing: &[KeyCredential],
+) -> Result<Vec<KeyCredential>, GraphError> {
+    let invalid = || GraphError::invalid_property("keyCredentials");
+    let entries = value.as_array().ok_or_else(invalid)?;
+    let now = OffsetDateTime::now_utc();
+    entries
+        .iter()
+        .map(|entry| {
+            let text = |name: &str| entry.get(name).and_then(Value::as_str).map(str::to_string);
+            let date = |name: &str| -> Result<Option<OffsetDateTime>, GraphError> {
+                text(name)
+                    .map(|raw| {
+                        OffsetDateTime::parse(&raw, &time::format_description::well_known::Rfc3339)
+                            .map_err(|_| invalid())
+                    })
+                    .transpose()
+            };
+            let key_id = text("keyId").unwrap_or_else(|| Uuid::new_v4().to_string());
+            let key = text("key").or_else(|| {
+                existing
+                    .iter()
+                    .find(|known| known.key_id == key_id)
+                    .and_then(|known| known.key.clone())
+            });
+            let start = date("startDateTime")?.unwrap_or(now);
+            Ok(KeyCredential {
+                key_id,
+                display_name: text("displayName"),
+                kind: text("type").ok_or_else(invalid)?,
+                usage: text("usage").ok_or_else(invalid)?,
+                key,
+                custom_key_identifier: text("customKeyIdentifier"),
+                start_date_time: start,
+                end_date_time: date("endDateTime")?.unwrap_or(start + Duration::days(365)),
+            })
+        })
+        .collect()
+}
+
 /// Apply every property in a create or update body.
 fn apply_all(application: &mut Application, fields: &Map<String, Value>) -> Result<(), GraphError> {
     for (property, value) in fields {
         match property.as_str() {
-            // Entra owns both identifiers.
+            // Entra owns both identifiers. A client may still send them back unchanged, as the
+            // azuread provider does when it writes an application's credentials, and Graph
+            // accepts that.
             "id" | "appId" => {
-                return Err(GraphError::invalid_request(format!(
-                    "The property '{property}' is read-only and cannot be modified."
-                )));
+                let current = if property == "id" {
+                    &application.id
+                } else {
+                    &application.app_id
+                };
+                if value.as_str() != Some(current.as_str()) {
+                    return Err(GraphError::invalid_request(format!(
+                        "The property '{property}' is read-only and cannot be modified."
+                    )));
+                }
             }
             "displayName" => {
                 application.display_name = value
@@ -243,9 +297,14 @@ fn apply_all(application: &mut Application, fields: &Map<String, Value>) -> Resu
                 }
                 application.extra.insert("api".to_string(), value.clone());
             }
-            // Credentials are managed through addPassword and addKey, which is also how Entra
-            // behaves: a secret written directly here would have no secretText to return.
-            "passwordCredentials" | "keyCredentials" => {}
+            // A secret is only ever created through addPassword, because a secret written
+            // directly here would have no secretText to return.
+            "passwordCredentials" => {}
+            // Certificates can be written directly, which is how the azuread provider adds one:
+            // it sends the whole list back with the new certificate appended.
+            "keyCredentials" => {
+                application.key_credentials = key_credentials(value, &application.key_credentials)?;
+            }
             // Handled by the caller, which resolves the references against the directory.
             "owners@odata.bind" => {}
             other if crate::graph::is_write_only_annotation(other) => {}
@@ -453,6 +512,7 @@ async fn add_key(
         kind: requested.kind,
         usage: requested.usage,
         key: Some(requested.key),
+        custom_key_identifier: None,
         start_date_time: start,
         end_date_time: end,
     };

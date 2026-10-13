@@ -233,6 +233,48 @@ async fn a_certificate_credential_can_be_added_and_removed() {
 }
 
 #[tokio::test]
+async fn a_certificate_can_be_written_with_the_application_as_the_azuread_provider_does() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let application = create_application(&graph, "My App").await;
+    let id = application["id"].as_str().unwrap();
+
+    // The provider sends the whole list back, and the application's own id with it.
+    let response = graph
+        .patch(
+            &format!("/v1.0/applications/{id}"),
+            &json!({
+                "id": id,
+                "keyCredentials": [{
+                    "keyId": "11111111-2222-3333-4444-555555555555",
+                    "displayName": "signing cert",
+                    "type": "AsymmetricX509Cert",
+                    "usage": "Verify",
+                    "key": "MIIB-not-a-real-certificate",
+                    "endDateTime": "2099-01-01T00:00:00Z"
+                }]
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 204);
+
+    let fetched = graph.get_ok(&format!("/v1.0/applications/{id}")).await;
+    let credential = &fetched["keyCredentials"][0];
+    assert_eq!(credential["keyId"], "11111111-2222-3333-4444-555555555555");
+    assert_eq!(credential["key"], "MIIB-not-a-real-certificate");
+    assert_eq!(credential["endDateTime"], "2099-01-01T00:00:00Z");
+
+    // A changed id is still refused.
+    let refused = graph
+        .patch(
+            &format!("/v1.0/applications/{id}"),
+            &json!({ "id": "another-id" }),
+        )
+        .await;
+    assert_eq!(refused.status(), 400);
+}
+
+#[tokio::test]
 async fn required_resource_access_round_trips_with_real_graph_identifiers() {
     let sim = Sim::start().await;
     let graph = sim.graph().await;
