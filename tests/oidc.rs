@@ -5,16 +5,33 @@ mod common;
 use common::Sim;
 
 #[tokio::test]
-async fn discovery_names_the_concrete_tenant_not_the_alias() {
+async fn discovery_through_an_alias_names_the_issuer_as_a_template() {
     let sim = Sim::start().await;
     let body = sim
         .get_json("/common/v2.0/.well-known/openid-configuration")
         .await;
 
-    // Entra resolves `common` at sign-in and always issues tokens naming a concrete tenant, so
-    // a client that pins the issuer from discovery still matches the tokens it receives.
+    // Microsoft: the tenant-independent document "returns an issuer value
+    // https://login.microsoftonline.com/{tenantid}/v2.0", and a client "should replace the
+    // {tenantid} value in the issuer metadata with the tenant id" of the token.
     assert_eq!(
         body["issuer"].as_str().unwrap(),
+        format!("{}/{{tenantid}}/v2.0", sim.public_base_url)
+    );
+    assert_eq!(
+        body["token_endpoint"].as_str().unwrap(),
+        format!("{}/common/oauth2/v2.0/token", sim.public_base_url)
+    );
+
+    // A tenant's own document names that tenant.
+    let own = sim
+        .get_json(&format!(
+            "/{}/v2.0/.well-known/openid-configuration",
+            sim.tenant_id
+        ))
+        .await;
+    assert_eq!(
+        own["issuer"].as_str().unwrap(),
         format!("{}/{}/v2.0", sim.public_base_url, sim.tenant_id)
     );
 }
@@ -97,14 +114,11 @@ async fn the_path_without_v2_serves_the_v1_document() {
     let v1 = sim
         .get_json("/common/.well-known/openid-configuration")
         .await;
-    assert_eq!(
-        v1["issuer"],
-        format!("https://sts.windows.net/{}/", sim.tenant_id).as_str()
-    );
+    assert_eq!(v1["issuer"], "https://sts.windows.net/{tenantid}/");
     let jwks_uri = v1["jwks_uri"].as_str().unwrap();
     assert_eq!(
         jwks_uri,
-        format!("{}/{}/discovery/keys", sim.public_base_url, sim.tenant_id)
+        format!("{}/common/discovery/keys", sim.public_base_url)
     );
     // The v1.0 protocol endpoints are not implemented, so they are not advertised.
     assert!(v1.get("authorization_endpoint").is_none(), "{v1}");

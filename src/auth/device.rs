@@ -93,6 +93,7 @@ async fn device_code(
         sessions.store_device_authorization(
             device_code.clone(),
             DeviceAuthorization {
+                tenant_id: tenant.clone(),
                 client_id: client_id.clone(),
                 scope,
                 user_code: user_code.clone(),

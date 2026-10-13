@@ -24,6 +24,8 @@ pub const ISSUED_LOG_CAPACITY: usize = 1000;
 /// An authorization code waiting to be exchanged.
 #[derive(Debug, Clone)]
 pub struct AuthorizationCode {
+    /// The tenant the user signed in to, which issues the tokens.
+    pub tenant_id: String,
     pub client_id: String,
     /// The redirect URI the code was issued for. The exchange must present the same one, so a
     /// stolen code cannot be redeemed towards a different destination.
@@ -41,6 +43,7 @@ pub struct AuthorizationCode {
 /// A refresh token waiting to be redeemed.
 #[derive(Debug, Clone)]
 pub struct RefreshToken {
+    pub tenant_id: String,
     pub client_id: String,
     pub user_id: String,
     pub scope: String,
@@ -123,6 +126,7 @@ const DELTA_STATE_CAPACITY: usize = 1000;
 /// A device code sign-in: what the device asked for, and how far the user has got.
 #[derive(Debug, Clone)]
 pub struct DeviceAuthorization {
+    pub tenant_id: String,
     pub client_id: String,
     pub scope: String,
     /// The short code the user types on the verification page.
@@ -149,6 +153,22 @@ impl Sessions {
     /// Record a code against its opaque value.
     pub fn store_code(&mut self, code: String, details: AuthorizationCode) {
         self.codes.insert(code, details);
+    }
+
+    /// The tenant a code, refresh token or device code belongs to, without consuming it.
+    pub fn tenant_of(&self, grant_type: &str, value: &str) -> Option<String> {
+        match grant_type {
+            "authorization_code" => self.codes.get(value).map(|code| code.tenant_id.clone()),
+            "refresh_token" => self
+                .refresh_tokens
+                .get(value)
+                .map(|token| token.tenant_id.clone()),
+            "urn:ietf:params:oauth:grant-type:device_code" => self
+                .device_authorizations
+                .get(value)
+                .map(|details| details.tenant_id.clone()),
+            _ => None,
+        }
     }
 
     /// Take a code, removing it.
@@ -323,6 +343,7 @@ mod tests {
 
     fn code(expires_at: OffsetDateTime) -> AuthorizationCode {
         AuthorizationCode {
+            tenant_id: "tenant".into(),
             client_id: "client".into(),
             redirect_uri: "https://app.test/cb".into(),
             user_id: "user".into(),
@@ -408,6 +429,7 @@ mod tests {
         sessions.store_refresh_token(
             "rt".into(),
             RefreshToken {
+                tenant_id: "tenant".into(),
                 client_id: "client".into(),
                 user_id: "user".into(),
                 scope: "openid".into(),
@@ -427,6 +449,7 @@ mod tests {
         sessions.store_device_authorization(
             "device".into(),
             DeviceAuthorization {
+                tenant_id: "tenant".into(),
                 client_id: "client".into(),
                 scope: "openid".into(),
                 user_code: "ABCDEFGHJ".into(),

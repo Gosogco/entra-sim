@@ -173,3 +173,196 @@ async fn a_malformed_additional_tenant_is_refused_at_startup() {
     .await;
     assert!(result.is_err());
 }
+
+/// A multitenant public client registered in the primary tenant, and carol in the second.
+async fn multitenant_fixture(sim: &Sim) -> (common::Client, String) {
+    let primary = sim.graph().await;
+    let client = primary
+        .register_public_client(
+            "Shared app",
+            json!({ "signInAudience": "AzureADMultipleOrgs" }),
+        )
+        .await;
+    let second = sim.graph_in(SECOND).await;
+    let carol = second
+        .create_user(&format!("carol@{SECOND_DOMAIN}"), "Carol Second")
+        .await;
+    (client, carol)
+}
+
+fn browser() -> reqwest::Client {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+}
+
+/// Choose `user` on the sign-in page reached through `tenant`, returning the response.
+async fn choose(
+    sim: &Sim,
+    tenant: &str,
+    client_id: &str,
+    user: &str,
+    scope: &str,
+) -> reqwest::Response {
+    browser()
+        .post(sim.url(&format!("/{tenant}/oauth2/v2.0/authorize")))
+        .form(&[
+            ("client_id", client_id),
+            ("response_type", "code"),
+            ("redirect_uri", common::SIGN_IN_REDIRECT),
+            ("scope", scope),
+            ("user_id", user),
+        ])
+        .send()
+        .await
+        .unwrap()
+}
+
+fn code_of(response: &reqwest::Response) -> String {
+    let location = response.headers()["location"].to_str().unwrap();
+    location
+        .split("code=")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no code in {location}"))
+        .split('&')
+        .next()
+        .unwrap()
+        .to_string()
+}
+
+async fn redeem(sim: &Sim, tenant: &str, client_id: &str, code: &str) -> reqwest::Response {
+    sim.client
+        .post(sim.url(&format!("/{tenant}/oauth2/v2.0/token")))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", client_id),
+            ("code", code),
+            ("redirect_uri", common::SIGN_IN_REDIRECT),
+        ])
+        .send()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn common_offers_users_from_every_tenant() {
+    let sim = two_tenants().await;
+    let (client, _) = multitenant_fixture(&sim).await;
+    sim.graph()
+        .await
+        .create_user("alice@entra-sim.test", "Alice Primary")
+        .await;
+
+    let page = browser()
+        .get(sim.url("/common/oauth2/v2.0/authorize"))
+        .query(&[
+            ("client_id", client.app_id.as_str()),
+            ("response_type", "code"),
+            ("redirect_uri", common::SIGN_IN_REDIRECT),
+            ("scope", "openid User.Read"),
+        ])
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("alice@entra-sim.test"), "{page}");
+    assert!(page.contains(&format!("carol@{SECOND_DOMAIN}")), "{page}");
+}
+
+#[tokio::test]
+async fn a_user_from_another_tenant_signs_in_to_their_own_tenant() {
+    let sim = two_tenants().await;
+    let (client, carol) = multitenant_fixture(&sim).await;
+
+    let response = choose(&sim, "common", &client.app_id, &carol, "openid User.Read").await;
+    assert_eq!(response.status(), 302);
+    let redeemed = redeem(&sim, "common", &client.app_id, &code_of(&response)).await;
+    assert_eq!(redeemed.status(), 200);
+    let tokens: Value = redeemed.json().await.unwrap();
+
+    // "When a response returns from the /common endpoint, the issuer value in the token
+    // corresponds to the user's tenant."
+    let id = common::decode_claims(tokens["id_token"].as_str().unwrap());
+    assert_eq!(id["tid"], SECOND);
+    assert_eq!(
+        id["iss"],
+        format!("{}/{SECOND}/v2.0", sim.public_base_url).as_str()
+    );
+
+    // "a representation of the application called a service principal is created in the
+    // user's tenant".
+    let second = sim.graph_in(SECOND).await;
+    let principals = second
+        .get_ok(&format!(
+            "/v1.0/servicePrincipals?$filter=appId%20eq%20'{}'",
+            client.app_id
+        ))
+        .await;
+    assert_eq!(principals["value"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_code_cannot_be_redeemed_against_another_tenant() {
+    let sim = two_tenants().await;
+    let (client, carol) = multitenant_fixture(&sim).await;
+    let response = choose(&sim, "common", &client.app_id, &carol, "openid User.Read").await;
+
+    let redeemed = redeem(&sim, &sim.tenant_id, &client.app_id, &code_of(&response)).await;
+    assert_eq!(redeemed.status(), 400);
+    let body: Value = redeemed.json().await.unwrap();
+    // Microsoft's reference: "AADSTS700005 InvalidGrantRedeemAgainstWrongTenant".
+    assert_eq!(body["error_codes"][0], 700005);
+}
+
+#[tokio::test]
+async fn a_single_tenant_app_is_refused_through_common() {
+    let sim = two_tenants().await;
+    let primary = sim.graph().await;
+    let client = primary.register_public_client("Mine only", json!({})).await;
+    let alice = primary.create_user("alice@entra-sim.test", "Alice").await;
+
+    let response = choose(&sim, "common", &client.app_id, &alice, "openid User.Read").await;
+    assert_eq!(response.status(), 400);
+    assert!(response.text().await.unwrap().contains("AADSTS50194"));
+}
+
+#[tokio::test]
+async fn a_tenant_specific_sign_in_refuses_a_user_from_another_tenant() {
+    let sim = two_tenants().await;
+    let (client, carol) = multitenant_fixture(&sim).await;
+
+    let response = choose(
+        &sim,
+        &sim.tenant_id,
+        &client.app_id,
+        &carol,
+        "openid User.Read",
+    )
+    .await;
+    assert_eq!(response.status(), 400);
+    assert!(response.text().await.unwrap().contains("AADSTS50020"));
+}
+
+#[tokio::test]
+async fn an_api_missing_from_the_users_tenant_is_refused() {
+    let sim = two_tenants().await;
+    let (client, carol) = multitenant_fixture(&sim).await;
+    sim.graph()
+        .await
+        .register_api("Orders", "api://orders", &[], &["Orders.Read"], json!({}))
+        .await;
+
+    let response = choose(
+        &sim,
+        "common",
+        &client.app_id,
+        &carol,
+        "openid api://orders/Orders.Read",
+    )
+    .await;
+    assert_eq!(response.status(), 400);
+    assert!(response.text().await.unwrap().contains("AADSTS650052"));
+}

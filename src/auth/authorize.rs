@@ -122,8 +122,14 @@ async fn show_sign_in(
     Query(request): Query<AuthorizeRequest>,
 ) -> Result<Response, Refusal> {
     check_tenant(&state, &tenant)?;
+    let alias = is_alias(&tenant);
+    let state = home_tenant(&state, alias, &request).await;
+    let candidates = sign_in_candidates(&state, alias).await;
     let directory = state.store.read().await;
     let validated = validate(&state, &directory, &request)?;
+    if alias {
+        refuse_single_tenant(&directory, &validated)?;
+    }
     let now = OffsetDateTime::now_utc();
 
     // The user this browser is already signed in as, which single sign-on reuses.
@@ -131,13 +137,14 @@ async fn show_sign_in(
         Some(id) => state.sessions.lock().await.browser_session_user(&id, now),
         None => None,
     }
-    .filter(|user_id| directory.users.contains_key(user_id))
     .filter(|user_id| {
-        // A hint naming someone else is a request for that user, not the signed-in one.
-        request.login_hint.as_deref().is_none_or(|hint| {
-            directory.users[user_id]
-                .user_principal_name
-                .eq_ignore_ascii_case(hint)
+        candidates.iter().any(|(id, _, upn)| {
+            id == user_id
+                // A hint naming someone else is a request for that user, not the signed-in one.
+                && request
+                    .login_hint
+                    .as_deref()
+                    .is_none_or(|hint| upn.eq_ignore_ascii_case(hint))
         })
     });
 
@@ -167,7 +174,7 @@ async fn show_sign_in(
             ));
         }
         drop(directory);
-        return Ok(issue_code(&state, &tenant, &request, &validated, &user_id, false).await);
+        return finish(&state, alias, &request, &validated, &user_id, false).await;
     }
 
     // `prompt=login` forces credentials and `select_account` the account picker; `consent` asks
@@ -186,7 +193,7 @@ async fn show_sign_in(
             .id
             .clone();
         drop(directory);
-        return Ok(issue_code(&state, &tenant, &request, &validated, &user, true).await);
+        return finish(&state, alias, &request, &validated, &user, true).await;
     }
 
     // Entra's default "is to either sign in the sole current user, show the account picker if
@@ -197,20 +204,10 @@ async fn show_sign_in(
         && consent_satisfied(&directory, &validated, &user_id)
     {
         drop(directory);
-        return Ok(issue_code(&state, &tenant, &request, &validated, &user_id, false).await);
+        return finish(&state, alias, &request, &validated, &user_id, false).await;
     }
 
-    let mut users: Vec<(String, String, String)> = directory
-        .users
-        .values()
-        .map(|user| {
-            (
-                user.id.clone(),
-                user.display_name.clone(),
-                user.user_principal_name.clone(),
-            )
-        })
-        .collect();
+    let mut users = candidates;
     // The hinted user goes first, as Entra pre-fills the hinted name.
     if let Some(hint) = request.login_hint.as_deref() {
         users.sort_by_key(|(_, _, upn)| !upn.eq_ignore_ascii_case(hint));
@@ -280,17 +277,188 @@ async fn complete_sign_in(
 ) -> Result<Response, Refusal> {
     let request = form.request;
     check_tenant(&state, &tenant)?;
+    let alias = is_alias(&tenant);
+    let state = home_tenant(&state, alias, &request).await;
     let directory = state.store.read().await;
     let validated = validate(&state, &directory, &request)?;
-
-    if !directory.users.contains_key(&form.user_id) {
-        return Err(unredirectable(
-            "The selected user is no longer in the directory.".to_string(),
-        ));
+    if alias {
+        refuse_single_tenant(&directory, &validated)?;
     }
     drop(directory);
 
-    Ok(issue_code(&state, &tenant, &request, &validated, &form.user_id, true).await)
+    finish(&state, alias, &request, &validated, &form.user_id, true).await
+}
+
+/// Whether a path segment is an alias that resolves to the user's own tenant at sign-in.
+fn is_alias(segment: &str) -> bool {
+    matches!(segment, "common" | "organizations")
+}
+
+/// The tenant whose registration of the client the request uses: through an alias, wherever the
+/// client is registered; otherwise the tenant in the path.
+async fn home_tenant(state: &AppState, alias: bool, request: &AuthorizeRequest) -> AppState {
+    let Some(client_id) = request.client_id.as_deref().filter(|_| alias) else {
+        return state.clone();
+    };
+    for tenant in state.all_tenants() {
+        if tenant
+            .store
+            .read()
+            .await
+            .application_by_app_id(client_id)
+            .is_some()
+        {
+            return tenant;
+        }
+    }
+    state.clone()
+}
+
+/// The users the sign-in page offers: every tenant's through an alias, otherwise the tenant's.
+async fn sign_in_candidates(state: &AppState, alias: bool) -> Vec<(String, String, String)> {
+    let tenants = if alias {
+        state.all_tenants()
+    } else {
+        vec![state.clone()]
+    };
+    let mut users = Vec::new();
+    for tenant in tenants {
+        let directory = tenant.store.read().await;
+        users.extend(directory.users.values().map(|user| {
+            (
+                user.id.clone(),
+                user.display_name.clone(),
+                user.user_principal_name.clone(),
+            )
+        }));
+    }
+    users
+}
+
+/// Refuse a single-tenant application used through an alias. Microsoft's reference: "AADSTS50194
+/// Application '{appId}'({appName}) isn't configured as a multitenant application. Usage of the
+/// /common endpoint isn't supported for such applications".
+fn refuse_single_tenant(directory: &Directory, validated: &Validated) -> Result<(), Refusal> {
+    let multi_tenant = directory
+        .application_by_app_id(&validated.client_id)
+        .and_then(|application| application.sign_in_audience.as_deref())
+        .is_some_and(|audience| {
+            matches!(
+                audience,
+                "AzureADMultipleOrgs" | "AzureADandPersonalMicrosoftAccount"
+            )
+        });
+    if multi_tenant {
+        return Ok(());
+    }
+    Err(unredirectable(format!(
+        "AADSTS50194: Application '{}'({}) isn't configured as a multitenant application. Usage \
+         of the /common endpoint isn't supported for such applications. Use a tenant-specific \
+         endpoint or configure the application to be multitenant.",
+        validated.client_id, validated.client_display_name
+    )))
+}
+
+/// Sign the chosen user in, in their own tenant.
+///
+/// A user from the client's own tenant signs in there. Through an alias, a user from another
+/// tenant signs in to their own: Microsoft's multitenant guide says that "When a user from a
+/// different tenant signs in to the application for the first time ... If they consent, then a
+/// representation of the application called a service principal is created in the user's
+/// tenant", and the token's issuer "corresponds to the user's tenant".
+async fn finish(
+    home: &AppState,
+    alias: bool,
+    request: &AuthorizeRequest,
+    validated: &Validated,
+    user_id: &str,
+    start_session: bool,
+) -> Result<Response, Refusal> {
+    let mut user_tenant = None;
+    for tenant in home.all_tenants() {
+        if tenant.store.read().await.users.contains_key(user_id) {
+            user_tenant = Some(tenant);
+            break;
+        }
+    }
+    let Some(user_tenant) = user_tenant else {
+        return Err(unredirectable(
+            "The selected user is no longer in the directory.".to_string(),
+        ));
+    };
+    if user_tenant.config.tenant_id == home.config.tenant_id {
+        return Ok(issue_code(home, "", request, validated, user_id, start_session).await);
+    }
+    if !alias {
+        return Err(unredirectable(format!(
+            "AADSTS50020: User account '{user_id}' does not exist in tenant '{}' and cannot \
+             access the application '{}'({}) in that tenant.",
+            home.config.tenant_id, validated.client_id, validated.client_display_name
+        )));
+    }
+
+    let application = home
+        .store
+        .read()
+        .await
+        .application_by_app_id(&validated.client_id)
+        .cloned()
+        .ok_or_else(|| unredirectable("The application is no longer registered.".to_string()))?;
+    let client_principal_id = {
+        let mut directory = user_tenant.store.write().await;
+        match directory.service_principal_by_app_id(&application.app_id) {
+            Some(principal) => principal.id.clone(),
+            None => {
+                let principal = crate::store::model::ServicePrincipal::for_application(
+                    Uuid::new_v4().to_string(),
+                    &application,
+                );
+                let id = principal.id.clone();
+                info!(
+                    app_id = %application.app_id,
+                    tenant = %user_tenant.config.tenant_id,
+                    "created the service principal of a multitenant application on consent"
+                );
+                directory.service_principals.insert(id.clone(), principal);
+                id
+            }
+        }
+    };
+    let (resources, oidc) = {
+        let directory = user_tenant.store.read().await;
+        resolve_scope(
+            &user_tenant,
+            &directory,
+            request.scope.as_deref().unwrap_or_default(),
+        )
+        .map_err(|unknown| {
+            // Microsoft's reference: "AADSTS650052 The app needs access to a service ... that
+            // your organization ... hasn't subscribed to or enabled."
+            unredirectable(format!(
+                "AADSTS650052: The app needs access to a service (\"{unknown}\") that your \
+                 organization (\"{}\") hasn't subscribed to or enabled.",
+                user_tenant.config.tenant_domain
+            ))
+        })?
+    };
+    let validated = Validated {
+        client_id: validated.client_id.clone(),
+        client_principal_id,
+        client_display_name: validated.client_display_name.clone(),
+        redirect_uri: validated.redirect_uri.clone(),
+        resources,
+        oidc,
+        response_mode: validated.response_mode,
+    };
+    Ok(issue_code(
+        &user_tenant,
+        "",
+        request,
+        &validated,
+        user_id,
+        start_session,
+    )
+    .await)
 }
 
 /// What validating an authorization request established.
@@ -488,6 +656,7 @@ async fn issue_code(
         sessions.store_code(
             code.clone(),
             AuthorizationCode {
+                tenant_id: state.config.tenant_id.clone(),
                 client_id: validated.client_id.clone(),
                 redirect_uri: validated.redirect_uri.clone(),
                 user_id: user_id.to_string(),

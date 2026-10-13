@@ -81,6 +81,33 @@ async fn token(
         return Err(oauth_error::invalid_tenant(&named_tenant));
     }
 
+    // A code, refresh token or device code belongs to the tenant the user signed in to. Through
+    // `common` or `organizations` the request is answered by that tenant; through another
+    // tenant's own path it is refused, as Entra does: "OAuth2 Authorization Code must be redeemed
+    // against same tenant it was acquired for (/common or /{tenant-ID} as appropriate)".
+    let presented = match request.grant_type.as_deref() {
+        Some("authorization_code") => request.code.as_deref(),
+        Some("refresh_token") => request.refresh_token.as_deref(),
+        Some(DEVICE_CODE) => request.device_code.as_deref(),
+        _ => None,
+    };
+    let owner = match (request.grant_type.as_deref(), presented) {
+        (Some(grant_type), Some(value)) => state.sessions.lock().await.tenant_of(grant_type, value),
+        _ => None,
+    };
+    let (state, tenant) = match owner {
+        Some(owner) if owner != tenant => {
+            if !matches!(named_tenant.as_str(), "common" | "organizations") {
+                return Err(oauth_error::grant_for_another_tenant());
+            }
+            let owner_state = state
+                .for_tenant(&owner)
+                .ok_or_else(|| oauth_error::invalid_tenant(&owner))?;
+            (owner_state, owner)
+        }
+        _ => (state, tenant),
+    };
+
     match request.grant_type.as_deref() {
         Some("client_credentials") => client_credentials(&state, &tenant, &headers, &request).await,
         Some("authorization_code") => authorization_code(&state, &tenant, &headers, &request).await,
@@ -1038,6 +1065,7 @@ async fn issue_user_tokens(
         sessions.store_refresh_token(
             token.clone(),
             crate::auth::sessions::RefreshToken {
+                tenant_id: tenant.to_string(),
                 client_id: client_id.to_string(),
                 user_id: user_id.to_string(),
                 scope: authorized_scope.to_string(),

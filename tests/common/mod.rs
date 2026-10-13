@@ -674,3 +674,30 @@ impl Graph {
         self.register_client(display_name, body).await
     }
 }
+
+impl Sim {
+    /// A Graph client holding a bootstrap token from `tenant`, for working in another tenant.
+    pub async fn graph_in(&self, tenant: &str) -> Graph {
+        let response = self
+            .client
+            .post(self.url(&format!("/{tenant}/oauth2/v2.0/token")))
+            .form(&[
+                ("grant_type", "client_credentials"),
+                ("client_id", self.bootstrap_client_id.as_str()),
+                ("client_secret", self.bootstrap_client_secret.as_str()),
+                ("scope", "https://graph.microsoft.com/.default"),
+            ])
+            .send()
+            .await
+            .expect("requesting a token");
+        let body: serde_json::Value = response.json().await.unwrap();
+        Graph {
+            base_url: self.base_url.clone(),
+            token: body["access_token"]
+                .as_str()
+                .expect("an access token")
+                .to_string(),
+            client: self.client.clone(),
+        }
+    }
+}

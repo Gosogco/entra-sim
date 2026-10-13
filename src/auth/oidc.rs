@@ -160,11 +160,18 @@ async fn configuration(
     ),
     OAuthFailure,
 > {
-    let tenant = served_tenant(&state, &tenant)?;
-    Ok((
-        [CACHE_CONTROL],
-        Json(document(&state.config.public_base_url(), &tenant)),
-    ))
+    let named = tenant;
+    served_tenant(&state, &named)?;
+    let mut body = document(
+        &state.config.public_base_url(),
+        &path_tenant(&state, &named),
+    );
+    if is_alias(&named) {
+        // Entra's document for an alias names the issuer as a template: "This endpoint returns
+        // an issuer value https://login.microsoftonline.com/{tenantid}/v2.0".
+        body.issuer = format!("{}/{{tenantid}}/v2.0", state.config.public_base_url());
+    }
+    Ok(([CACHE_CONTROL], Json(body)))
 }
 
 async fn v1_configuration(
@@ -177,11 +184,30 @@ async fn v1_configuration(
     ),
     OAuthFailure,
 > {
-    let tenant = served_tenant(&state, &tenant)?;
-    Ok((
-        [CACHE_CONTROL],
-        Json(v1_document(&state.config.public_base_url(), &tenant)),
-    ))
+    let named = tenant;
+    served_tenant(&state, &named)?;
+    let mut body = v1_document(
+        &state.config.public_base_url(),
+        &path_tenant(&state, &named),
+    );
+    if is_alias(&named) {
+        body.issuer = "https://sts.windows.net/{tenantid}/".to_string();
+    }
+    Ok(([CACHE_CONTROL], Json(body)))
+}
+
+fn is_alias(named: &str) -> bool {
+    matches!(named, "common" | "organizations" | "consumers")
+}
+
+/// How the document's endpoints name the tenant: an alias as itself, as Entra's do, and anything
+/// else as the tenant ID.
+fn path_tenant(state: &AppState, named: &str) -> String {
+    if is_alias(named) {
+        named.to_string()
+    } else {
+        state.config.tenant_id.clone()
+    }
 }
 
 /// The tenant a discovery path names, or Entra's `invalid_tenant` answer for one it does not

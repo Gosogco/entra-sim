@@ -387,6 +387,21 @@ pub fn user_disabled() -> OAuthFailure {
     }
 }
 
+/// A code or refresh token redeemed against a different tenant from the one it was issued in.
+/// Microsoft's reference: "AADSTS700005 InvalidGrantRedeemAgainstWrongTenant".
+pub fn grant_for_another_tenant() -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "invalid_grant",
+            700005,
+            "AADSTS700005: Provided Authorization Code is intended to use against other tenant, \
+             thus rejected."
+                .to_string(),
+        ),
+    }
+}
+
 /// The presented grant — a code, a refresh token — is not usable.
 pub fn invalid_grant(description: impl Into<String>) -> OAuthFailure {
     OAuthFailure {
