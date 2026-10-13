@@ -103,7 +103,9 @@ table.data tbody tr:last-child td { border-bottom: 0; }
 tr.expandable { cursor: pointer; }
 tr.expandable:hover > td { background: var(--soft); }
 tr.open > td { background: var(--soft); border-bottom-color: transparent; }
-tr.details > td { background: var(--soft); padding: .25rem 1rem 1rem 2.4rem; }
+/* A URL or token has no natural break, and one that cannot wrap widens the whole table past the
+   window, which puts its scrollbar at the bottom of a long table, out of sight. */
+tr.details > td { background: var(--soft); padding: .25rem 1rem 1rem 2.4rem; overflow-wrap: anywhere; }
 tr.is-expired > td { opacity: .55; }
 .toggle-col { width: 1.6rem; color: var(--muted); padding-right: 0 !important; }
 td.empty { color: var(--muted); text-align: center; padding: 1.25rem; }
@@ -130,6 +132,7 @@ ul.plain li + li { margin-top: .15rem; }
 .warn { color: var(--warn); }
 .bad { color: var(--bad); }
 .nowrap { white-space: nowrap; }
+.wrap-anywhere { overflow-wrap: anywhere; }
 .ref { border-bottom: 1px dotted var(--muted); cursor: help; }
 .unknown { color: var(--warn); }
 .kind {

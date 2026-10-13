@@ -119,6 +119,7 @@ export function LogView({ fetchedAt, version }: { fetchedAt: number; version: st
               ) : (
                 <EventSummary event={entry} />
               ),
+            className: 'wrap-anywhere',
           },
           {
             header: 'Status',
