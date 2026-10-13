@@ -112,7 +112,13 @@ pub struct Sessions {
     browser_sessions: HashMap<String, BrowserSession>,
     /// Device code sign-ins in progress, by device code.
     device_authorizations: HashMap<String, DeviceAuthorization>,
+    /// What each delta token stands for, oldest first so the oldest can be dropped.
+    delta_states: VecDeque<(String, crate::graph::delta::DeltaState)>,
 }
+
+/// How many delta tokens are remembered. Microsoft keeps directory delta tokens for seven days;
+/// a bound on the count keeps a long test run from growing the map without limit.
+const DELTA_STATE_CAPACITY: usize = 1000;
 
 /// A device code sign-in: what the device asked for, and how far the user has got.
 #[derive(Debug, Clone)]
@@ -257,6 +263,23 @@ impl Sessions {
     /// Remove a device authorization once its tokens are issued, so the code is single-use.
     pub fn take_device_authorization(&mut self, device_code: &str) -> Option<DeviceAuthorization> {
         self.device_authorizations.remove(device_code)
+    }
+
+    /// Remember what a delta round saw, returning its token.
+    pub fn store_delta_state(&mut self, state: crate::graph::delta::DeltaState) -> String {
+        if self.delta_states.len() >= DELTA_STATE_CAPACITY {
+            self.delta_states.pop_front();
+        }
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        self.delta_states.push_back((token.clone(), state));
+        token
+    }
+
+    pub fn delta_state(&self, token: &str) -> Option<crate::graph::delta::DeltaState> {
+        self.delta_states
+            .iter()
+            .find(|(known, _)| known == token)
+            .map(|(_, state)| state.clone())
     }
 
     /// Drop everything that has expired.

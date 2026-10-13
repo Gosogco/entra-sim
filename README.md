@@ -216,7 +216,6 @@ breaks the simulator surfaces as a failing check rather than a confusing provide
 
 ## What it does not do
 
-- No delta queries.
 - One tenant per process. `common`, `organizations` and `consumers` resolve to it.
 - Writes are immediately readable; there is no eventual consistency to trip over.
 - Conditional access, entitlement management, administrative units, PIM and synchronization jobs

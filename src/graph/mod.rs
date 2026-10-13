@@ -12,6 +12,7 @@
 pub mod app_role_assignments;
 pub mod applications;
 pub mod batch;
+pub mod delta;
 pub mod directory_roles;
 pub mod error;
 pub mod groups;
@@ -23,6 +24,7 @@ pub mod users;
 
 use axum::Json;
 use axum::response::IntoResponse;
+use axum::routing::get;
 use axum::{Router, response::Response};
 
 use crate::odata::{Collection, Query, encode_skiptoken, paginate, project};
@@ -46,6 +48,44 @@ pub fn router() -> Router<AppState> {
 fn resources() -> Router<AppState> {
     Router::new()
         .route("/$batch", axum::routing::post(batch::batch))
+        // "/delta is a shortcut for the fully qualified name /microsoft.graph.delta"; the Graph
+        // SDKs call delta() with parentheses.
+        .route("/users/delta", get(delta::users))
+        .route("/users/delta()", get(delta::users))
+        .route("/users/microsoft.graph.delta()", get(delta::users))
+        .route("/groups/delta", get(delta::groups))
+        .route("/groups/delta()", get(delta::groups))
+        .route("/groups/microsoft.graph.delta()", get(delta::groups))
+        .route("/applications/delta", get(delta::applications))
+        .route("/applications/delta()", get(delta::applications))
+        .route(
+            "/applications/microsoft.graph.delta()",
+            get(delta::applications),
+        )
+        .route("/servicePrincipals/delta", get(delta::service_principals))
+        .route("/servicePrincipals/delta()", get(delta::service_principals))
+        .route(
+            "/servicePrincipals/microsoft.graph.delta()",
+            get(delta::service_principals),
+        )
+        .route("/directoryRoles/delta", get(delta::directory_roles))
+        .route("/directoryRoles/delta()", get(delta::directory_roles))
+        .route(
+            "/directoryRoles/microsoft.graph.delta()",
+            get(delta::directory_roles),
+        )
+        .route(
+            "/oauth2PermissionGrants/delta",
+            get(delta::oauth2_permission_grants),
+        )
+        .route(
+            "/oauth2PermissionGrants/delta()",
+            get(delta::oauth2_permission_grants),
+        )
+        .route(
+            "/oauth2PermissionGrants/microsoft.graph.delta()",
+            get(delta::oauth2_permission_grants),
+        )
         .merge(users::router())
         .merge(groups::router())
         .merge(applications::router())

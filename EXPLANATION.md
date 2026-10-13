@@ -1129,7 +1129,6 @@ The simulator does not support these:
 
 | Not supported | Effect |
 |---|---|
-| Delta queries | A client that syncs changes fails |
 | More than one tenant | One process serves one tenant |
 | Eventual consistency | A write is readable at once. Real Entra is slower. |
 | Conditional access, PIM, entitlement management | Not present |
