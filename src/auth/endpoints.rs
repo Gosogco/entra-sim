@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 use tracing::{info, warn};
 
+use crate::auth::claims::{self, TokenType};
 use crate::auth::oauth_error::{self, OAuthFailure};
 use crate::auth::scopes::{self, RequestedResource};
 use crate::auth::sessions::{Grant, IssuedToken, SubjectKind, TokenKind};
@@ -156,6 +157,7 @@ async fn client_credentials(
                     principal_id: &principal.id,
                 },
                 roles: roles.clone(),
+                extra_claims: Default::default(),
                 ttl_seconds: state.config.token_ttl_seconds,
             },
             now,
@@ -493,7 +495,16 @@ async fn issue_user_tokens(
     let issuer = format!("{advertised}/{tenant}/v2.0");
 
     let resource = &target.resource;
-    let (user_principal_name, display_name, given_name, family_name, roles, version) = {
+    let (
+        user_principal_name,
+        display_name,
+        given_name,
+        family_name,
+        roles,
+        version,
+        access_groups,
+        id_groups,
+    ) = {
         let directory = state.store.read().await;
         let user = directory.users.get(user_id).ok_or_else(|| {
             oauth_error::no_grant("AADSTS50034: The user account does not exist in the directory.")
@@ -511,13 +522,22 @@ async fn issue_user_tokens(
                 .map(|group| group.id.clone()),
         );
         let roles = directory.granted_role_values(&holders, &resource.principal_id);
+        // Each token carries the group claims of the application it is issued for: the API for
+        // the access token, the client for the ID token.
+        let group_claims = |app_id: &str, token_type| {
+            claims::group_claims(&directory, tenant, user_id, app_id, token_type)
+        };
+        let access_groups = group_claims(&resource.app_id, TokenType::Access);
+        let id_groups = group_claims(client_id, TokenType::Id);
         (
             user.user_principal_name.clone(),
             user.display_name.clone(),
             user.given_name.clone(),
             user.surname.clone(),
-            roles,
+            access_groups.roles_instead.clone().unwrap_or(roles),
             directory.requested_access_token_version(&resource.app_id),
+            access_groups.claims,
+            id_groups,
         )
     };
 
@@ -564,6 +584,7 @@ async fn issue_user_tokens(
                     scope: &scope,
                 },
                 roles: roles.clone(),
+                extra_claims: access_groups,
                 ttl_seconds: state.config.token_ttl_seconds,
             },
             now,
@@ -573,6 +594,10 @@ async fn issue_user_tokens(
     let (access_token, expires_in) =
         signed.map_err(|error| oauth_error::server_error(error.to_string()))?;
 
+    let mut id_claims = id_groups.claims;
+    if let Some(groups) = id_groups.roles_instead {
+        id_claims.insert("roles".to_string(), serde_json::json!(groups));
+    }
     let id_token = crate::auth::token::issue_id_token(
         &state.signing_key,
         crate::auth::token::IdTokenRequest {
@@ -583,6 +608,7 @@ async fn issue_user_tokens(
             user_principal_name: &user_principal_name,
             display_name: &display_name,
             nonce,
+            extra_claims: id_claims,
             ttl_seconds: state.config.token_ttl_seconds,
         },
         now,

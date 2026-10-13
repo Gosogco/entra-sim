@@ -219,6 +219,8 @@ pub struct ApiTokenRequest<'a> {
     pub subject: ApiTokenSubject<'a>,
     /// App roles the subject holds on the API.
     pub roles: Vec<String>,
+    /// Claims the API's registration asks for, such as `groups`, added last.
+    pub extra_claims: serde_json::Map<String, serde_json::Value>,
     pub ttl_seconds: u64,
 }
 
@@ -312,6 +314,9 @@ pub fn issue_api_token(
     if !request.roles.is_empty() {
         set("roles", json!(request.roles));
     }
+    for (name, value) in request.extra_claims {
+        set(&name, value);
+    }
 
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some(key.kid.clone());
@@ -342,6 +347,9 @@ pub struct IdTokenClaims {
     /// Echoed from the authorization request, so the client can tie the token to it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nonce: Option<String>,
+    /// Claims the client's registration asks for, such as `groups`.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Everything needed to mint an ID token.
@@ -353,6 +361,7 @@ pub struct IdTokenRequest<'a> {
     pub user_principal_name: &'a str,
     pub display_name: &'a str,
     pub nonce: Option<&'a str>,
+    pub extra_claims: serde_json::Map<String, serde_json::Value>,
     pub ttl_seconds: u64,
 }
 
@@ -376,6 +385,7 @@ pub fn issue_id_token(
         name: request.display_name.to_string(),
         preferred_username: request.user_principal_name.to_string(),
         nonce: request.nonce.map(str::to_string),
+        extra: request.extra_claims,
     };
 
     let mut header = Header::new(Algorithm::RS256);

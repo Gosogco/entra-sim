@@ -254,6 +254,40 @@ impl Directory {
             .collect()
     }
 
+    /// Every group the object belongs to, directly or through nested groups.
+    ///
+    /// Cycles are possible in a simulated directory, so visited IDs are tracked.
+    pub fn transitive_groups_of(&self, id: &str) -> Vec<&Group> {
+        let mut found: Vec<&Group> = Vec::new();
+        let mut pending = vec![id.to_string()];
+        while let Some(current) = pending.pop() {
+            for group in self.groups_containing(&current) {
+                if found.iter().any(|known| known.id == group.id) {
+                    continue;
+                }
+                found.push(group);
+                pending.push(group.id.clone());
+            }
+        }
+        found.sort_by(|left, right| left.id.cmp(&right.id));
+        found
+    }
+
+    /// The activated directory roles the object holds, directly or through a group it is a
+    /// direct member of.
+    pub fn directory_roles_of(&self, id: &str) -> Vec<&DirectoryRole> {
+        let mut holders = vec![id.to_string()];
+        holders.extend(
+            self.groups_containing(id)
+                .into_iter()
+                .map(|group| group.id.clone()),
+        );
+        self.directory_roles
+            .values()
+            .filter(|role| role.members.iter().any(|member| holders.contains(member)))
+            .collect()
+    }
+
     /// Members of a group, following nested groups.
     ///
     /// Nested groups appear in the result as well as their members, which is what Graph does.

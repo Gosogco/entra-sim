@@ -590,3 +590,82 @@ impl Sim {
         .await
     }
 }
+
+/// The redirect URI `Sim::sign_in` registers clients with.
+pub const SIGN_IN_REDIRECT: &str = "https://app.example.test/signed-in";
+
+impl Sim {
+    /// Sign `user_id` in through the public client `client_id` for `scope`, the way a browser
+    /// would by choosing the user on the sign-in page, and redeem the code. Returns the raw token
+    /// response. The client must have `SIGN_IN_REDIRECT` registered.
+    pub async fn sign_in(&self, client_id: &str, user_id: &str, scope: &str) -> reqwest::Response {
+        let browser = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let redirect = browser
+            .post(self.url(&format!("/{}/oauth2/v2.0/authorize", self.tenant_id)))
+            .form(&[
+                ("client_id", client_id),
+                ("response_type", "code"),
+                ("redirect_uri", SIGN_IN_REDIRECT),
+                ("scope", scope),
+                ("user_id", user_id),
+            ])
+            .send()
+            .await
+            .expect("submitting the sign-in form");
+        assert_eq!(redirect.status(), 302, "the sign-in should redirect");
+        let location = redirect.headers()["location"].to_str().unwrap().to_string();
+        let code = location
+            .split_once('?')
+            .and_then(|(_, query)| query.split('&').find_map(|pair| pair.strip_prefix("code=")))
+            .unwrap_or_else(|| panic!("no code in {location}"))
+            .to_string();
+
+        browser
+            .post(self.url(&format!("/{}/oauth2/v2.0/token", self.tenant_id)))
+            .form(&[
+                ("grant_type", "authorization_code"),
+                ("client_id", client_id),
+                ("code", code.as_str()),
+                ("redirect_uri", SIGN_IN_REDIRECT),
+            ])
+            .send()
+            .await
+            .expect("redeeming the code")
+    }
+
+    /// `sign_in`, asserting success and returning the decoded token response.
+    pub async fn sign_in_ok(
+        &self,
+        client_id: &str,
+        user_id: &str,
+        scope: &str,
+    ) -> serde_json::Value {
+        let response = self.sign_in(client_id, user_id, scope).await;
+        let status = response.status();
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert!(status.is_success(), "the sign-in returned {status}: {body}");
+        body
+    }
+}
+
+impl Graph {
+    /// Register a public client that `Sim::sign_in` can sign users in through.
+    pub async fn register_public_client(
+        &self,
+        display_name: &str,
+        extra: serde_json::Value,
+    ) -> Client {
+        let mut body = serde_json::json!({
+            "publicClient": { "redirectUris": [SIGN_IN_REDIRECT] }
+        });
+        if let (Some(body), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
+            for (key, value) in extra {
+                body.insert(key.clone(), value.clone());
+            }
+        }
+        self.register_client(display_name, body).await
+    }
+}
