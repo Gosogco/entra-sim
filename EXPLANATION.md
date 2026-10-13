@@ -1130,7 +1130,6 @@ The simulator does not support these:
 | `$batch` | A client that batches requests fails |
 | Delta queries | A client that syncs changes fails |
 | More than one tenant | One process serves one tenant |
-| `prompt=none` in a hidden iframe | MSAL uses the refresh token first, so this is only reached after 24 hours |
 | Eventual consistency | A write is readable at once. Real Entra is slower. |
 | Conditional access, PIM, entitlement management | Not present |
 

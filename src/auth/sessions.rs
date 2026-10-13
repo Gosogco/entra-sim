@@ -104,6 +104,15 @@ pub struct Sessions {
     refresh_tokens: HashMap<String, RefreshToken>,
     /// Newest first.
     issued: VecDeque<IssuedToken>,
+    /// Browser sign-in sessions, by the value of the session cookie.
+    browser_sessions: HashMap<String, BrowserSession>,
+}
+
+/// A user signed in to the simulator in a browser, which is what single sign-on reuses.
+#[derive(Debug, Clone)]
+pub struct BrowserSession {
+    pub user_id: String,
+    pub expires_at: OffsetDateTime,
 }
 
 impl Sessions {
@@ -164,6 +173,31 @@ impl Sessions {
             .map(|(token, details)| (token.as_str(), details))
     }
 
+    /// Start a browser session for a user who just signed in, returning the cookie value.
+    pub fn start_browser_session(&mut self, user_id: &str, now: OffsetDateTime) -> String {
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        self.browser_sessions.insert(
+            id.clone(),
+            BrowserSession {
+                user_id: user_id.to_string(),
+                expires_at: now + Duration::hours(BROWSER_SESSION_LIFETIME_HOURS),
+            },
+        );
+        id
+    }
+
+    /// The user a session cookie belongs to, if the session is still live.
+    pub fn browser_session_user(&self, id: &str, now: OffsetDateTime) -> Option<String> {
+        self.browser_sessions
+            .get(id)
+            .filter(|session| session.expires_at > now)
+            .map(|session| session.user_id.clone())
+    }
+
+    pub fn end_browser_session(&mut self, id: &str) {
+        self.browser_sessions.remove(id);
+    }
+
     /// Drop everything that has expired.
     ///
     /// Called on each issuance rather than from a timer, which keeps the map from growing
@@ -172,6 +206,8 @@ impl Sessions {
         self.codes.retain(|_, code| code.expires_at > now);
         self.refresh_tokens
             .retain(|_, token| token.expires_at > now);
+        self.browser_sessions
+            .retain(|_, session| session.expires_at > now);
     }
 }
 
@@ -181,6 +217,10 @@ pub type SessionStore = Arc<Mutex<Sessions>>;
 pub fn new_store() -> SessionStore {
     Arc::new(Mutex::new(Sessions::default()))
 }
+
+/// How long a browser stays signed in. Entra's own session lasts longer; a day is enough for a test
+/// run and short enough that a forgotten session does not linger.
+const BROWSER_SESSION_LIFETIME_HOURS: i64 = 24;
 
 pub fn code_expiry(now: OffsetDateTime) -> OffsetDateTime {
     now + Duration::minutes(CODE_LIFETIME_MINUTES)

@@ -8,7 +8,7 @@
 
 use axum::Router;
 use axum::extract::{Form, Path, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use serde::Deserialize;
@@ -33,8 +33,11 @@ pub struct AuthorizeRequest {
     pub code_challenge: Option<String>,
     pub code_challenge_method: Option<String>,
     pub response_mode: Option<String>,
-    /// `login` forces the picker even when a user is configured for automatic sign-in.
+    /// `login`, `select_account` and `consent` show the page even when the user could be
+    /// signed in without it; `none` forbids showing it.
     pub prompt: Option<String>,
+    /// The user to offer first on the sign-in page.
+    pub login_hint: Option<String>,
 }
 
 pub fn router() -> Router<AppState> {
@@ -104,13 +107,60 @@ impl IntoResponse for Unredirectable {
 async fn show_sign_in(
     State(state): State<AppState>,
     Path(tenant): Path<String>,
+    headers: HeaderMap,
     Query(request): Query<AuthorizeRequest>,
 ) -> Result<Response, Refusal> {
     let directory = state.store.read().await;
     let validated = validate(&state, &directory, &request)?;
+    let now = OffsetDateTime::now_utc();
 
-    // `prompt=login` is a client asking to see the picker regardless.
-    let forced = request.prompt.as_deref() == Some("login");
+    // The user this browser is already signed in as, which single sign-on reuses.
+    let signed_in = match session_cookie(&headers) {
+        Some(id) => state.sessions.lock().await.browser_session_user(&id, now),
+        None => None,
+    }
+    .filter(|user_id| directory.users.contains_key(user_id))
+    .filter(|user_id| {
+        // A hint naming someone else is a request for that user, not the signed-in one.
+        request.login_hint.as_deref().is_none_or(|hint| {
+            directory.users[user_id]
+                .user_principal_name
+                .eq_ignore_ascii_case(hint)
+        })
+    });
+
+    let prompt = request.prompt.as_deref();
+    if prompt == Some("none") {
+        // Microsoft: "prompt=none ... ensures that the user isn't presented with any
+        // interactive prompt", with `login_required` when "a single user couldn't be found" and
+        // `interaction_required` when "Another authentication step or consent is required".
+        let Some(user_id) = signed_in else {
+            return Err(redirect_error(
+                &validated.redirect_uri,
+                validated.response_mode,
+                request.state.as_deref(),
+                "login_required",
+                "AADSTS50058: A silent sign-in request was sent but no user is signed in.",
+            ));
+        };
+        if !consent_satisfied(&directory, &validated, &user_id) {
+            return Err(redirect_error(
+                &validated.redirect_uri,
+                validated.response_mode,
+                request.state.as_deref(),
+                "interaction_required",
+                "AADSTS65001: The user or administrator has not consented to use the \
+                 application. Send an interactive authorization request for this user and \
+                 resource.",
+            ));
+        }
+        drop(directory);
+        return Ok(issue_code(&state, &tenant, &request, &validated, &user_id, false).await);
+    }
+
+    // `prompt=login` forces credentials and `select_account` the account picker; `consent` asks
+    // for consent again. The simulator's page does all three.
+    let forced = matches!(prompt, Some("login" | "select_account" | "consent"));
     if let Some(upn) = state.config.auto_sign_in_user.as_deref()
         && !forced
     {
@@ -124,12 +174,21 @@ async fn show_sign_in(
             .id
             .clone();
         drop(directory);
-        return Ok(issue_code(&state, &tenant, &request, &validated, &user)
-            .await
-            .into_response());
+        return Ok(issue_code(&state, &tenant, &request, &validated, &user, true).await);
     }
 
-    let users: Vec<(String, String, String)> = directory
+    // Entra's default "is to either sign in the sole current user, show the account picker if
+    // there are multiple users, or show the login page if there are no users signed in". A
+    // signed-in user who has already consented is signed in again without the page.
+    if !forced
+        && let Some(user_id) = signed_in
+        && consent_satisfied(&directory, &validated, &user_id)
+    {
+        drop(directory);
+        return Ok(issue_code(&state, &tenant, &request, &validated, &user_id, false).await);
+    }
+
+    let mut users: Vec<(String, String, String)> = directory
         .users
         .values()
         .map(|user| {
@@ -140,8 +199,57 @@ async fn show_sign_in(
             )
         })
         .collect();
+    // The hinted user goes first, as Entra pre-fills the hinted name.
+    if let Some(hint) = request.login_hint.as_deref() {
+        users.sort_by_key(|(_, _, upn)| !upn.eq_ignore_ascii_case(hint));
+    }
 
     Ok(Html(sign_in_page(&request, &validated, &users)).into_response())
+}
+
+/// Whether the user has already consented to everything the request names, so that signing
+/// them in again needs no page. Only permissions the API publishes count, since nothing else can
+/// be consented to.
+fn consent_satisfied(directory: &Directory, validated: &Validated, user_id: &str) -> bool {
+    validated.resources.iter().all(|requested| {
+        let Some(resource) = directory.service_principals.get(&requested.principal_id) else {
+            return true;
+        };
+        let consented =
+            directory.consented_scopes(&validated.client_id, user_id, &requested.principal_id);
+        requested
+            .named_scopes()
+            .filter(|scope| {
+                resource
+                    .oauth2_permission_scopes
+                    .iter()
+                    .any(|published| published.value.as_deref() == Some(scope.as_str()))
+            })
+            .all(|scope| consented.contains(scope))
+    })
+}
+
+/// The name of the cookie that carries the browser session.
+const SESSION_COOKIE: &str = "entra_sim_session";
+
+fn session_cookie(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(name, _)| *name == SESSION_COOKIE)
+        .map(|(_, value)| value.to_string())
+}
+
+/// `SameSite=None` because the cookie has to travel with a request from the client's own site,
+/// such as a hidden iframe doing `prompt=none`.
+fn session_cookie_header(value: &str, max_age_seconds: i64) -> String {
+    format!(
+        "{SESSION_COOKIE}={value}; Path=/; Max-Age={max_age_seconds}; HttpOnly; Secure; \
+         SameSite=None"
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,11 +275,7 @@ async fn complete_sign_in(
     }
     drop(directory);
 
-    Ok(
-        issue_code(&state, &tenant, &request, &validated, &form.user_id)
-            .await
-            .into_response(),
-    )
+    Ok(issue_code(&state, &tenant, &request, &validated, &form.user_id, true).await)
 }
 
 /// What validating an authorization request established.
@@ -341,6 +445,7 @@ async fn issue_code(
     request: &AuthorizeRequest,
     validated: &Validated,
     user_id: &str,
+    start_session: bool,
 ) -> Response {
     let now = OffsetDateTime::now_utc();
     if let Some(refused) = unassigned(state, validated, user_id).await {
@@ -381,11 +486,22 @@ async fn issue_code(
         parameters.push(("state", value.as_str()));
     }
 
-    respond(
+    let mut response = respond(
         &validated.redirect_uri,
         validated.response_mode,
         &parameters,
-    )
+    );
+    if start_session {
+        let id = state
+            .sessions
+            .lock()
+            .await
+            .start_browser_session(user_id, now);
+        if let Ok(cookie) = header::HeaderValue::from_str(&session_cookie_header(&id, 86_400)) {
+            response.headers_mut().append(header::SET_COOKIE, cookie);
+        }
+    }
+    response
 }
 
 /// Return the authorization response to the client in the requested mode.
@@ -586,10 +702,17 @@ struct LogoutRequest {
     post_logout_redirect_uri: Option<String>,
 }
 
-/// The simulator keeps no browser session, so signing out is only the redirect.
-async fn logout(Query(request): Query<LogoutRequest>) -> Response {
+/// Sign the browser out: end its session, so the next sign-in shows the page again.
+async fn logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(request): Query<LogoutRequest>,
+) -> Response {
+    if let Some(id) = session_cookie(&headers) {
+        state.sessions.lock().await.end_browser_session(&id);
+    }
     info!("signed out");
-    match request.post_logout_redirect_uri {
+    let mut response = match request.post_logout_redirect_uri {
         Some(uri) => found(&uri),
         None => (
             StatusCode::OK,
@@ -600,7 +723,11 @@ async fn logout(Query(request): Query<LogoutRequest>) -> Response {
             )),
         )
             .into_response(),
+    };
+    if let Ok(cookie) = header::HeaderValue::from_str(&session_cookie_header("", 0)) {
+        response.headers_mut().append(header::SET_COOKIE, cookie);
     }
+    response
 }
 
 /// The sign-in and consent page.

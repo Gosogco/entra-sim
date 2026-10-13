@@ -165,8 +165,10 @@ implemented.
 Interactive clients register their redirect URIs on the application as usual. The simulator's
 sign-in page lists the tenant's users and the permissions being requested; choosing a user both
 signs in and records consent as a real `oauth2PermissionGrant`, so the resulting token's scopes
-come from the directory the way Entra derives them. Set `--auto-sign-in-user` to skip the page
-in tests that cannot drive a browser.
+come from the directory the way Entra derives them. Signing in starts a browser session, so a
+later sign-in by the same browser skips the page once consent is in place, and `prompt=none`,
+`prompt=select_account`, `prompt=consent`, `prompt=login` and `login_hint` behave as they do in
+Entra. Set `--auto-sign-in-user` to skip the page in tests that cannot drive a browser.
 
 ## Driving it from a test suite
 
