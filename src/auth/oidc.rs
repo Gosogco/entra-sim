@@ -23,6 +23,7 @@ pub struct OpenIdConfiguration {
     pub jwks_uri: String,
     pub end_session_endpoint: String,
     pub userinfo_endpoint: String,
+    pub device_authorization_endpoint: String,
     pub response_types_supported: Vec<&'static str>,
     pub response_modes_supported: Vec<&'static str>,
     pub grant_types_supported: Vec<&'static str>,
@@ -72,6 +73,7 @@ pub fn document(base_url: &str, tenant: &str) -> OpenIdConfiguration {
         end_session_endpoint: format!("{base_url}/{tenant}/oauth2/v2.0/logout"),
         // Entra names Graph's UserInfo endpoint here; the simulator is its own Graph.
         userinfo_endpoint: format!("{base_url}/oidc/userinfo"),
+        device_authorization_endpoint: format!("{base_url}/{tenant}/oauth2/v2.0/devicecode"),
         response_types_supported: vec!["code"],
         response_modes_supported: vec!["query", "fragment", "form_post"],
         grant_types_supported: vec![
@@ -79,6 +81,7 @@ pub fn document(base_url: &str, tenant: &str) -> OpenIdConfiguration {
             "refresh_token",
             "client_credentials",
             "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "urn:ietf:params:oauth:grant-type:device_code",
         ],
         subject_types_supported: vec!["pairwise"],
         id_token_signing_alg_values_supported: vec!["RS256"],

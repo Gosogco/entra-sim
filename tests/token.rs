@@ -177,7 +177,10 @@ async fn an_unsupported_grant_type_is_refused() {
     let sim = Sim::start().await;
     let response = sim
         .token_request(&[
-            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+            (
+                "grant_type",
+                "urn:ietf:params:oauth:grant-type:saml1_1-bearer",
+            ),
             ("client_id", &sim.bootstrap_client_id),
         ])
         .await;

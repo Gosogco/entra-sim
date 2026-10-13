@@ -89,6 +89,8 @@ pub enum Grant {
     RefreshToken,
     /// `urn:ietf:params:oauth:grant-type:jwt-bearer` with `requested_token_use=on_behalf_of`.
     OnBehalfOf,
+    /// `urn:ietf:params:oauth:grant-type:device_code`.
+    DeviceCode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -106,6 +108,26 @@ pub struct Sessions {
     issued: VecDeque<IssuedToken>,
     /// Browser sign-in sessions, by the value of the session cookie.
     browser_sessions: HashMap<String, BrowserSession>,
+    /// Device code sign-ins in progress, by device code.
+    device_authorizations: HashMap<String, DeviceAuthorization>,
+}
+
+/// A device code sign-in: what the device asked for, and how far the user has got.
+#[derive(Debug, Clone)]
+pub struct DeviceAuthorization {
+    pub client_id: String,
+    pub scope: String,
+    /// The short code the user types on the verification page.
+    pub user_code: String,
+    pub expires_at: OffsetDateTime,
+    pub status: DeviceStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceStatus {
+    Pending,
+    Approved { user_id: String },
+    Declined,
 }
 
 /// A user signed in to the simulator in a browser, which is what single sign-on reuses.
@@ -198,6 +220,43 @@ impl Sessions {
         self.browser_sessions.remove(id);
     }
 
+    pub fn store_device_authorization(
+        &mut self,
+        device_code: String,
+        details: DeviceAuthorization,
+    ) {
+        self.device_authorizations.insert(device_code, details);
+    }
+
+    /// A device authorization by its device code. Expired ones stay until evicted, so the
+    /// device can be told its code expired rather than that it never existed.
+    pub fn device_authorization(&self, device_code: &str) -> Option<&DeviceAuthorization> {
+        self.device_authorizations.get(device_code)
+    }
+
+    /// The device code of a pending, unexpired sign-in, by the code the user typed.
+    pub fn pending_device_code(&self, user_code: &str, now: OffsetDateTime) -> Option<String> {
+        self.device_authorizations
+            .iter()
+            .find(|(_, details)| {
+                details.user_code.eq_ignore_ascii_case(user_code)
+                    && details.status == DeviceStatus::Pending
+                    && details.expires_at > now
+            })
+            .map(|(code, _)| code.clone())
+    }
+
+    pub fn set_device_status(&mut self, device_code: &str, status: DeviceStatus) {
+        if let Some(details) = self.device_authorizations.get_mut(device_code) {
+            details.status = status;
+        }
+    }
+
+    /// Remove a device authorization once its tokens are issued, so the code is single-use.
+    pub fn take_device_authorization(&mut self, device_code: &str) -> Option<DeviceAuthorization> {
+        self.device_authorizations.remove(device_code)
+    }
+
     /// Drop everything that has expired.
     ///
     /// Called on each issuance rather than from a timer, which keeps the map from growing
@@ -208,6 +267,9 @@ impl Sessions {
             .retain(|_, token| token.expires_at > now);
         self.browser_sessions
             .retain(|_, session| session.expires_at > now);
+        // Kept an hour past expiry, so a device still polling hears expired_token.
+        self.device_authorizations
+            .retain(|_, details| details.expires_at + Duration::hours(1) > now);
     }
 }
 
@@ -331,5 +393,34 @@ mod tests {
         // Entra consumes the presented token and issues a replacement.
         assert!(sessions.take_refresh_token("rt", now).is_some());
         assert!(sessions.take_refresh_token("rt", now).is_none());
+    }
+
+    #[test]
+    fn an_expired_device_code_is_no_longer_offered_to_the_user() {
+        let now = OffsetDateTime::now_utc();
+        let mut sessions = Sessions::default();
+        sessions.store_device_authorization(
+            "device".into(),
+            DeviceAuthorization {
+                client_id: "client".into(),
+                scope: "openid".into(),
+                user_code: "ABCDEFGHJ".into(),
+                expires_at: now + Duration::minutes(15),
+                status: DeviceStatus::Pending,
+            },
+        );
+        assert_eq!(
+            sessions.pending_device_code("abcdefghj", now).as_deref(),
+            Some("device"),
+            "the user code is matched case-insensitively"
+        );
+        assert!(
+            sessions
+                .pending_device_code("ABCDEFGHJ", now + Duration::minutes(16))
+                .is_none()
+        );
+        // The device can still be told it expired.
+        sessions.evict_expired(now + Duration::minutes(16));
+        assert!(sessions.device_authorization("device").is_some());
     }
 }

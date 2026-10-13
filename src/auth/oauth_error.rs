@@ -318,6 +318,17 @@ pub fn on_behalf_of_consent_required(scope: &str) -> OAuthFailure {
     }
 }
 
+/// A device polling for its tokens before, or instead of, the user finishing. The `error` values
+/// are the ones Microsoft's device authorization documentation lists, and the codes are its
+/// error reference's: AADSTS70016 AuthorizationPending, AADSTS70018 BadVerificationCode,
+/// AADSTS70019 CodeExpired, and AADSTS65004 UserDeclinedConsent.
+pub fn device_flow(error: &'static str, code: u32, description: &str) -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(error, code, format!("AADSTS{code}: {description}")),
+    }
+}
+
 /// The presented grant — a code, a refresh token — is not usable.
 pub fn invalid_grant(description: impl Into<String>) -> OAuthFailure {
     OAuthFailure {

@@ -283,7 +283,7 @@ async fn complete_sign_in(
 /// What validating an authorization request established.
 /// Where the authorization response is placed in the redirect URL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ResponseMode {
+pub(crate) enum ResponseMode {
     /// In the query string. Entra's default for the code flow.
     Query,
     /// After a `#`. The only mode msal-browser uses.
@@ -292,18 +292,18 @@ enum ResponseMode {
     FormPost,
 }
 
-struct Validated {
-    client_id: String,
+pub(crate) struct Validated {
+    pub(crate) client_id: String,
     /// Object ID of the client's service principal.
-    client_principal_id: String,
-    client_display_name: String,
-    redirect_uri: String,
+    pub(crate) client_principal_id: String,
+    pub(crate) client_display_name: String,
+    pub(crate) redirect_uri: String,
     /// The APIs the client asked for permissions on, in the order it named them. Graph when it
     /// named none.
-    resources: Vec<RequestedResource>,
+    pub(crate) resources: Vec<RequestedResource>,
     /// The OpenID Connect scopes the client asked for.
-    oidc: Vec<String>,
-    response_mode: ResponseMode,
+    pub(crate) oidc: Vec<String>,
+    pub(crate) response_mode: ResponseMode,
 }
 
 fn validate(
@@ -387,23 +387,42 @@ fn validate(
     }
 
     let scope = request.scope.as_deref().unwrap_or_default();
+    let (resources, oidc) = resolve_scope(state, directory, scope).map_err(|unknown| {
+        // The client and redirect URI are genuine by now, so the error goes back to the
+        // client, as Entra's `invalid_resource` does.
+        redirect_error(
+            redirect_uri,
+            response_mode,
+            request.state.as_deref(),
+            "invalid_resource",
+            &format!(
+                "AADSTS500011: The resource principal named {unknown} was not found in the \
+                 tenant named {}.",
+                state.config.tenant_id
+            ),
+        )
+    })?;
+
+    Ok(Validated {
+        client_id: client_id.to_string(),
+        client_principal_id: principal.id.clone(),
+        client_display_name: application.display_name.clone(),
+        redirect_uri: redirect_uri.to_string(),
+        resources,
+        oidc,
+        response_mode,
+    })
+}
+
+/// The APIs a scope parameter names, Graph when it names none, and its OpenID Connect scopes. An
+/// API that is not in the directory is returned as the error.
+pub(crate) fn resolve_scope(
+    state: &AppState,
+    directory: &Directory,
+    scope: &str,
+) -> Result<(Vec<RequestedResource>, Vec<String>), String> {
     let (oidc, named) = scopes::parse(scope);
-    let mut resources = scopes::resolve(directory, &state.config.public_base_url(), &named)
-        .map_err(|unknown| {
-            // The client and redirect URI are genuine by now, so the error goes back to the
-            // client, as Entra's `invalid_resource` does.
-            redirect_error(
-                redirect_uri,
-                response_mode,
-                request.state.as_deref(),
-                "invalid_resource",
-                &format!(
-                    "AADSTS500011: The resource principal named {unknown} was not found in the \
-                     tenant named {}.",
-                    state.config.tenant_id
-                ),
-            )
-        })?;
+    let mut resources = scopes::resolve(directory, &state.config.public_base_url(), &named)?;
     if resources.is_empty()
         && let Some(graph) = directory.graph_service_principal()
     {
@@ -415,16 +434,7 @@ fn validate(
             values: Vec::new(),
         });
     }
-
-    Ok(Validated {
-        client_id: client_id.to_string(),
-        client_principal_id: principal.id.clone(),
-        client_display_name: application.display_name.clone(),
-        redirect_uri: redirect_uri.to_string(),
-        resources,
-        oidc,
-        response_mode,
-    })
+    Ok((resources, oidc))
 }
 
 /// Every redirect URI registered on the application, across the three client kinds.
@@ -585,7 +595,11 @@ fn found(location: &str) -> Response {
 /// Refuse a user who is not assigned to the client app, or to an API the client asked for, when
 /// that application requires assignment. Entra shows this on its sign-in page rather than
 /// redirecting to the client.
-async fn unassigned(state: &AppState, validated: &Validated, user_id: &str) -> Option<Response> {
+pub(crate) async fn unassigned(
+    state: &AppState,
+    validated: &Validated,
+    user_id: &str,
+) -> Option<Response> {
     let directory = state.store.read().await;
     let applications = std::iter::once(validated.client_principal_id.as_str()).chain(
         validated
@@ -614,7 +628,7 @@ async fn unassigned(state: &AppState, validated: &Validated, user_id: &str) -> O
 /// Entra stores consent in the directory and derives the token's scopes from it, so the
 /// simulator does the same: a client cannot widen its own token by asking for more scopes than
 /// were consented, and an administrator revoking the grant narrows the next token.
-async fn consent(state: &AppState, validated: &Validated, user_id: &str) {
+pub(crate) async fn consent(state: &AppState, validated: &Validated, user_id: &str) {
     let mut directory = state.store.write().await;
     for requested in with_oidc_on_graph(&directory, validated) {
         consent_to(&mut directory, validated, &requested, user_id);
@@ -848,7 +862,7 @@ fn sign_in_page(
 ///
 /// Everything is inline: the page has to render with no network access, since the simulator may
 /// be the only thing reachable from wherever it is running.
-fn page(title: &str, body: &str) -> String {
+pub(crate) fn page(title: &str, body: &str) -> String {
     format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
@@ -872,7 +886,7 @@ fn page(title: &str, body: &str) -> String {
     )
 }
 
-fn escape(value: &str) -> String {
+pub(crate) fn escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")

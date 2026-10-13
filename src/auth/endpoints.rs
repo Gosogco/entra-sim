@@ -38,6 +38,8 @@ pub struct TokenRequest {
     pub client_assertion_type: Option<String>,
     /// A JWT signed by the client, in place of a secret.
     pub client_assertion: Option<String>,
+    /// The code a device polls with, in the device authorization grant.
+    pub device_code: Option<String>,
     /// The incoming token, in the on-behalf-of flow.
     pub assertion: Option<String>,
     pub requested_token_use: Option<String>,
@@ -80,6 +82,7 @@ async fn token(
         Some("authorization_code") => authorization_code(&state, &tenant, &headers, &request).await,
         Some("refresh_token") => refresh_token(&state, &tenant, &headers, &request).await,
         Some(JWT_BEARER) => on_behalf_of(&state, &tenant, &headers, &request).await,
+        Some(DEVICE_CODE) => device_code(&state, &tenant, &headers, &request).await,
         Some(other) => Err(oauth_error::unsupported_grant_type(other)),
         None => Err(oauth_error::invalid_request(
             "AADSTS900144: The request body must contain the following parameter: 'grant_type'.",
@@ -372,6 +375,106 @@ async fn refresh_token(
             nonce: None,
             id_token: true,
             grant: Grant::RefreshToken,
+        },
+        now,
+    )
+    .await
+}
+
+/// The grant type a device polls with.
+const DEVICE_CODE: &str = "urn:ietf:params:oauth:grant-type:device_code";
+
+/// Answer a device polling for the tokens of a device code sign-in.
+async fn device_code(
+    state: &AppState,
+    tenant: &str,
+    headers: &HeaderMap,
+    request: &TokenRequest,
+) -> Result<Json<TokenResponse>, OAuthFailure> {
+    use crate::auth::sessions::DeviceStatus;
+
+    let device_code = request.device_code.as_deref().ok_or_else(|| {
+        oauth_error::invalid_request(
+            "AADSTS900144: The request body must contain the following parameter: \
+             'device_code'.",
+        )
+    })?;
+    let now = OffsetDateTime::now_utc();
+    let bad_code = || {
+        oauth_error::device_flow(
+            "bad_verification_code",
+            70018,
+            "The device_code was not recognized.",
+        )
+    };
+    let details = state
+        .sessions
+        .lock()
+        .await
+        .device_authorization(device_code)
+        .cloned()
+        .ok_or_else(bad_code)?;
+    // Microsoft: client_id "Must match the client_id used in the initial request."
+    if request.client_id.as_deref() != Some(details.client_id.as_str()) {
+        return Err(bad_code());
+    }
+    if details.expires_at <= now {
+        return Err(oauth_error::device_flow(
+            "expired_token",
+            70019,
+            "Verification code expired.",
+        ));
+    }
+    let user_id = match details.status {
+        DeviceStatus::Pending => {
+            return Err(oauth_error::device_flow(
+                "authorization_pending",
+                70016,
+                "OAuth 2.0 device flow error. Authorization is pending. Continue polling.",
+            ));
+        }
+        DeviceStatus::Declined => {
+            return Err(oauth_error::device_flow(
+                "authorization_declined",
+                65004,
+                "User declined to consent to access the app.",
+            ));
+        }
+        DeviceStatus::Approved { user_id } => user_id,
+    };
+    let client_auth =
+        authenticate_if_presented(state, tenant, &details.client_id, headers, request, now).await?;
+    // Single use, like an authorization code.
+    state
+        .sessions
+        .lock()
+        .await
+        .take_device_authorization(device_code);
+    let target = {
+        let directory = state.store.read().await;
+        user_token_target(
+            &directory,
+            state,
+            tenant,
+            &details.client_id,
+            &user_id,
+            &details.scope,
+            None,
+            Redemption::AuthorizationCode,
+        )?
+    };
+    issue_user_tokens(
+        state,
+        tenant,
+        SignIn {
+            client_id: &details.client_id,
+            user_id: &user_id,
+            target,
+            authorized_scope: &details.scope,
+            client_auth,
+            nonce: None,
+            id_token: true,
+            grant: Grant::DeviceCode,
         },
         now,
     )

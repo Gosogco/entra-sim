@@ -29,6 +29,7 @@ pub fn router(state: AppState) -> Router {
         .merge(auth::oidc::router())
         .merge(auth::endpoints::router())
         .merge(auth::authorize::router())
+        .merge(auth::device::router())
         .merge(graph::router());
 
     // A fallback, so it only answers paths no route claims. The studio keeps its tab in the URL
