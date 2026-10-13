@@ -35,6 +35,8 @@ pub struct Directory {
     pub oauth2_permission_grants: BTreeMap<String, OAuth2PermissionGrant>,
     /// Directory roles that have been activated in this tenant.
     pub directory_roles: BTreeMap<String, DirectoryRole>,
+    /// Conditional access policies, kept as Graph's JSON.
+    pub conditional_access_policies: BTreeMap<String, Value>,
 }
 
 impl Directory {

@@ -12,6 +12,7 @@
 pub mod app_role_assignments;
 pub mod applications;
 pub mod batch;
+pub mod conditional_access;
 pub mod delta;
 pub mod directory_roles;
 pub mod error;
@@ -87,6 +88,7 @@ fn resources() -> Router<AppState> {
             get(delta::oauth2_permission_grants),
         )
         .merge(users::router())
+        .merge(conditional_access::router())
         .merge(groups::router())
         .merge(applications::router())
         .merge(service_principals::router())

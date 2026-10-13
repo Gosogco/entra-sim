@@ -142,3 +142,28 @@ output "client_secret" {
 output "group_members" {
   value = [azuread_group_member.engineer.member_object_id]
 }
+
+# A conditional access policy in report-only mode, so it is evaluated and logged but never
+# refuses a sign-in.
+resource "azuread_conditional_access_policy" "legacy" {
+  display_name = "Block legacy authentication"
+  state        = "enabledForReportingButNotEnforced"
+
+  conditions {
+    client_app_types = ["exchangeActiveSync", "other"]
+
+    applications {
+      included_applications = ["All"]
+    }
+
+    users {
+      included_users = ["All"]
+      excluded_users = [azuread_user.engineer.object_id]
+    }
+  }
+
+  grant_controls {
+    operator          = "OR"
+    built_in_controls = ["block"]
+  }
+}

@@ -26,6 +26,7 @@ pub struct Snapshot {
     pub app_role_assignments: Vec<AppRoleAssignment>,
     pub oauth2_permission_grants: Vec<OAuth2PermissionGrant>,
     pub directory_roles: Vec<DirectoryRole>,
+    pub conditional_access_policies: Vec<serde_json::Value>,
     /// Group membership and ownership, which are navigation properties and so are not carried
     /// on the group itself.
     pub group_links: Vec<GroupLinks>,
@@ -107,6 +108,11 @@ impl Snapshot {
                 .cloned()
                 .collect(),
             directory_roles: directory.directory_roles.values().cloned().collect(),
+            conditional_access_policies: directory
+                .conditional_access_policies
+                .values()
+                .cloned()
+                .collect(),
             group_links: directory
                 .groups
                 .values()
@@ -189,6 +195,9 @@ impl Snapshot {
                 grant.id.clone()
             }),
             directory_roles: by_id(self.directory_roles, |role| role.id.clone()),
+            conditional_access_policies: by_id(self.conditional_access_policies, |policy| {
+                policy["id"].as_str().unwrap_or_default().to_string()
+            }),
         };
 
         // Reattach everything the entities do not carry themselves.

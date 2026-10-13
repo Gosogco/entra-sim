@@ -144,6 +144,8 @@ pub struct Config {
             String::from("Directory.ReadWrite.All"),
             String::from("Group.ReadWrite.All"),
             String::from("GroupMember.ReadWrite.All"),
+            String::from("Policy.Read.All"),
+            String::from("Policy.ReadWrite.ConditionalAccess"),
             String::from("RoleManagement.ReadWrite.Directory"),
             String::from("User.ReadWrite.All"),
         ],
