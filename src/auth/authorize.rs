@@ -348,6 +348,9 @@ async fn issue_code(
     user_id: &str,
 ) -> Response {
     let now = OffsetDateTime::now_utc();
+    if let Some(refused) = unassigned(state, validated, user_id).await {
+        return refused;
+    }
     consent(state, validated, user_id).await;
 
     let code = Uuid::new_v4().simple().to_string();
@@ -415,6 +418,33 @@ fn found(location: &str) -> Response {
         [(header::LOCATION, location.to_string())],
     )
         .into_response()
+}
+
+/// Refuse a user who is not assigned to the client app, or to an API the client asked for, when
+/// that application requires assignment. Entra shows this on its sign-in page rather than
+/// redirecting to the client.
+async fn unassigned(state: &AppState, validated: &Validated, user_id: &str) -> Option<Response> {
+    let directory = state.store.read().await;
+    let applications = std::iter::once(validated.client_principal_id.as_str()).chain(
+        validated
+            .resources
+            .iter()
+            .map(|resource| resource.principal_id.as_str()),
+    );
+    for principal_id in applications {
+        if directory.user_may_access(user_id, principal_id) {
+            continue;
+        }
+        let principal = directory.service_principals.get(principal_id)?;
+        return Some(
+            Unredirectable(crate::auth::oauth_error::user_not_assigned_description(
+                &principal.app_id,
+                &principal.display_name,
+            ))
+            .into_response(),
+        );
+    }
+    None
 }
 
 /// Record the user's consent as a permission grant on each API the client asked for.

@@ -114,6 +114,54 @@ impl Directory {
         })
     }
 
+    /// Whether a user may obtain a token for the application whose service principal is
+    /// `resource_id`, when that application requires assignment.
+    ///
+    /// Microsoft: "If this option is set to Yes, then users and other applications or services
+    /// must first be assigned this application before being able to access it", and "Users with
+    /// a Global Administrator role can sign in to applications, regardless of the assignment
+    /// required settings." Any assignment counts, including the default access role, and so does
+    /// one made to a security group the user is a direct member of.
+    pub fn user_may_access(&self, user_id: &str, resource_id: &str) -> bool {
+        let Some(resource) = self.service_principals.get(resource_id) else {
+            return true;
+        };
+        if !resource.app_role_assignment_required {
+            return true;
+        }
+        if self
+            .directory_roles_of(user_id)
+            .iter()
+            .any(|role| role.role_template_id == GLOBAL_ADMINISTRATOR_TEMPLATE_ID)
+        {
+            return true;
+        }
+        let mut holders = vec![user_id.to_string()];
+        holders.extend(
+            self.groups_containing(user_id)
+                .into_iter()
+                .filter(|group| group.security_enabled)
+                .map(|group| group.id.clone()),
+        );
+        self.is_assigned(&holders, resource_id)
+    }
+
+    /// Whether an application may obtain an app-only token for the application whose service
+    /// principal is `resource_id`, when that application requires assignment.
+    pub fn app_may_access(&self, client_principal_id: &str, resource_id: &str) -> bool {
+        self.service_principals
+            .get(resource_id)
+            .is_none_or(|resource| !resource.app_role_assignment_required)
+            || self.is_assigned(&[client_principal_id.to_string()], resource_id)
+    }
+
+    fn is_assigned(&self, principal_ids: &[String], resource_id: &str) -> bool {
+        self.app_role_assignments.values().any(|assignment| {
+            assignment.resource_id == resource_id
+                && principal_ids.contains(&assignment.principal_id)
+        })
+    }
+
     /// The access token version the API `app_id` asks for in `api.requestedAccessTokenVersion`.
     ///
     /// Microsoft: "The values of `null` and `1` result in v1.0 tokens, and the value of `2`
@@ -328,6 +376,9 @@ fn annotate<T: serde::Serialize>(kind: ObjectKind, object: &T) -> Value {
     }
     value
 }
+
+/// The template ID of the built-in Global Administrator directory role.
+pub const GLOBAL_ADMINISTRATOR_TEMPLATE_ID: &str = "62e90394-69f5-4237-9190-012177145e10";
 
 /// The two access token formats Entra issues for a registered API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

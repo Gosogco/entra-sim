@@ -149,6 +149,46 @@ pub fn consent_required(scope: &str) -> OAuthFailure {
     }
 }
 
+/// The user is not assigned to an application that requires assignment.
+pub fn user_not_assigned(app_id: &str, app_name: &str) -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "invalid_grant",
+            50105,
+            user_not_assigned_description(app_id, app_name),
+        ),
+    }
+}
+
+/// Microsoft's reference: "EntitlementGrantsNotFound - The signed in user isn't assigned to a
+/// role for the signed in app."
+pub fn user_not_assigned_description(app_id: &str, app_name: &str) -> String {
+    format!(
+        "AADSTS50105: Your administrator has configured the application {app_name} ('{app_id}') \
+         to block users unless they are specifically granted ('assigned') access to the \
+         application. The signed in user isn't assigned to a role for the signed in app."
+    )
+}
+
+/// The client application is not assigned to an API that requires assignment.
+///
+/// AADSTS501051 is not in Microsoft's error code reference, but it is what Entra returns in this
+/// case, as reports of the error from the field show.
+pub fn app_not_assigned(client: &str, resource_app_id: &str, resource_name: &str) -> OAuthFailure {
+    OAuthFailure {
+        status: StatusCode::BAD_REQUEST,
+        body: OAuthError::new(
+            "invalid_grant",
+            501051,
+            format!(
+                "AADSTS501051: Application '{client}' is not assigned to a role for the \
+                 application '{resource_app_id}'({resource_name})."
+            ),
+        ),
+    }
+}
+
 /// The presented grant — a code, a refresh token — is not usable.
 pub fn invalid_grant(description: impl Into<String>) -> OAuthFailure {
     OAuthFailure {

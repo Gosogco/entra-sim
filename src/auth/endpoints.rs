@@ -120,6 +120,13 @@ async fn client_credentials(
     let Some(resource) = directory.resource_for(&resource_name, &advertised) else {
         return Err(oauth_error::invalid_resource(&resource_name, tenant));
     };
+    if !directory.app_may_access(&principal.id, &resource.id) {
+        return Err(oauth_error::app_not_assigned(
+            &client_id,
+            &resource.app_id,
+            &resource.display_name,
+        ));
+    }
 
     let issuer = format!("{advertised}/{tenant}/v2.0");
     let roles = directory.granted_role_values(std::slice::from_ref(&principal.id), &resource.id);
@@ -444,6 +451,15 @@ fn user_token_target(
     } else {
         resources.remove(0)
     };
+
+    if !directory.user_may_access(user_id, &resource.principal_id) {
+        let name = directory
+            .service_principals
+            .get(&resource.principal_id)
+            .map(|principal| principal.display_name.clone())
+            .unwrap_or_default();
+        return Err(oauth_error::user_not_assigned(&resource.app_id, &name));
+    }
 
     let granted = directory.consented_scopes(client_id, user_id, &resource.principal_id);
     if redemption == Redemption::AuthorizationCode
