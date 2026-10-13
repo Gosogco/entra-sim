@@ -1331,7 +1331,8 @@ async fn an_api_scope_the_api_does_not_publish_is_not_granted() {
     )
     .await;
     let claims = common::decode_claims(tokens["access_token"].as_str().unwrap());
-    assert_eq!(claims["scp"], "", "{claims}");
+    // Microsoft: "Claims are present only if a value exists to fill it".
+    assert!(claims.get("scp").is_none(), "{claims}");
 }
 
 #[tokio::test]

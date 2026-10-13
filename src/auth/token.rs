@@ -302,8 +302,11 @@ pub fn issue_api_token(
             } else {
                 set("preferred_username", json!(user_principal_name));
             }
-            // Microsoft: `scp` is "Only included for user tokens".
-            set("scp", json!(scope));
+            // Microsoft: `scp` is "Only included for user tokens", and "Claims are present only
+            // if a value exists to fill it".
+            if !scope.is_empty() {
+                set("scp", json!(scope));
+            }
         }
     }
     if !request.roles.is_empty() {
