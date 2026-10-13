@@ -211,22 +211,24 @@ async fn show_sign_in(
 /// them in again needs no page. Only permissions the API publishes count, since nothing else can
 /// be consented to.
 fn consent_satisfied(directory: &Directory, validated: &Validated, user_id: &str) -> bool {
-    validated.resources.iter().all(|requested| {
-        let Some(resource) = directory.service_principals.get(&requested.principal_id) else {
-            return true;
-        };
-        let consented =
-            directory.consented_scopes(&validated.client_id, user_id, &requested.principal_id);
-        requested
-            .named_scopes()
-            .filter(|scope| {
-                resource
-                    .oauth2_permission_scopes
-                    .iter()
-                    .any(|published| published.value.as_deref() == Some(scope.as_str()))
-            })
-            .all(|scope| consented.contains(scope))
-    })
+    with_oidc_on_graph(directory, validated)
+        .iter()
+        .all(|requested| {
+            let Some(resource) = directory.service_principals.get(&requested.principal_id) else {
+                return true;
+            };
+            let consented =
+                directory.consented_scopes(&validated.client_id, user_id, &requested.principal_id);
+            requested
+                .named_scopes()
+                .filter(|scope| {
+                    resource
+                        .oauth2_permission_scopes
+                        .iter()
+                        .any(|published| published.value.as_deref() == Some(scope.as_str()))
+                })
+                .all(|scope| consented.contains(scope))
+        })
 }
 
 /// The name of the cookie that carries the browser session.
@@ -299,6 +301,8 @@ struct Validated {
     /// The APIs the client asked for permissions on, in the order it named them. Graph when it
     /// named none.
     resources: Vec<RequestedResource>,
+    /// The OpenID Connect scopes the client asked for.
+    oidc: Vec<String>,
     response_mode: ResponseMode,
 }
 
@@ -383,7 +387,7 @@ fn validate(
     }
 
     let scope = request.scope.as_deref().unwrap_or_default();
-    let (_, named) = scopes::parse(scope);
+    let (oidc, named) = scopes::parse(scope);
     let mut resources = scopes::resolve(directory, &state.config.public_base_url(), &named)
         .map_err(|unknown| {
             // The client and redirect URI are genuine by now, so the error goes back to the
@@ -418,6 +422,7 @@ fn validate(
         client_display_name: application.display_name.clone(),
         redirect_uri: redirect_uri.to_string(),
         resources,
+        oidc,
         response_mode,
     })
 }
@@ -611,9 +616,40 @@ async fn unassigned(state: &AppState, validated: &Validated, user_id: &str) -> O
 /// were consented, and an administrator revoking the grant narrows the next token.
 async fn consent(state: &AppState, validated: &Validated, user_id: &str) {
     let mut directory = state.store.write().await;
-    for requested in &validated.resources {
-        consent_to(&mut directory, validated, requested, user_id);
+    for requested in with_oidc_on_graph(&directory, validated) {
+        consent_to(&mut directory, validated, &requested, user_id);
     }
+}
+
+/// The APIs a request names, with its OpenID Connect scopes added to Graph's permissions.
+///
+/// Microsoft: "openid, email, profile, and offline_access" are "well-defined scopes that are
+/// also hosted on Microsoft Graph", so consent to them is consent to Graph.
+fn with_oidc_on_graph(directory: &Directory, validated: &Validated) -> Vec<RequestedResource> {
+    let mut resources = validated.resources.clone();
+    if validated.oidc.is_empty() {
+        return resources;
+    }
+    match resources.iter_mut().find(|resource| resource.is_graph()) {
+        Some(graph) => {
+            for scope in &validated.oidc {
+                if !graph.values.contains(scope) {
+                    graph.values.push(scope.clone());
+                }
+            }
+        }
+        None => {
+            if let Some(graph) = directory.graph_service_principal() {
+                resources.push(RequestedResource {
+                    principal_id: graph.id.clone(),
+                    app_id: graph.app_id.clone(),
+                    requested_as: None,
+                    values: validated.oidc.clone(),
+                });
+            }
+        }
+    }
+    resources
 }
 
 fn consent_to(

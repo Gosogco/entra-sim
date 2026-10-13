@@ -701,7 +701,15 @@ async fn issue_user_tokens(
         )
     };
 
-    let scope = target.granted.join(" ");
+    // `offline_access` is consented on Graph like the other OpenID Connect scopes, but it governs
+    // whether a refresh token is issued rather than access to Graph, so it stays out of `scp`.
+    let granted: Vec<String> = target
+        .granted
+        .iter()
+        .filter(|scope| *scope != "offline_access")
+        .cloned()
+        .collect();
+    let scope = granted.join(" ");
     let (audience, signed) = if resource.is_graph() {
         let signed = issue_user_token(
             &state.signing_key,
@@ -809,7 +817,7 @@ async fn issue_user_tokens(
     if id_token.is_some() {
         sessions.record_issued(issued(TokenKind::Id, client_id, Vec::new()));
     }
-    sessions.record_issued(issued(TokenKind::Access, &audience, target.granted.clone()));
+    sessions.record_issued(issued(TokenKind::Access, &audience, granted.clone()));
 
     let refresh = if target.offline_access {
         let token = uuid::Uuid::new_v4().simple().to_string();
@@ -837,8 +845,7 @@ async fn issue_user_tokens(
         "issued user tokens"
     );
 
-    let qualified: Vec<String> = target
-        .granted
+    let qualified: Vec<String> = granted
         .iter()
         .map(|value| resource.qualify(value))
         .collect();

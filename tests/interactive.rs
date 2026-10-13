@@ -68,6 +68,24 @@ async fn fixture_for(graph: &Graph, upn: &str, display_name: &str) -> Fixture {
     }
 }
 
+/// The Graph permissions in a token's `scp`, leaving out the OpenID Connect scopes, which Graph
+/// hosts too and which a sign-in consents to alongside them.
+fn graph_permissions(scp: &serde_json::Value) -> String {
+    scp.as_str()
+        .unwrap_or_default()
+        .split(' ')
+        .filter(|scope| !["openid", "profile", "email", ""].contains(scope))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Whether a grant includes `scope` among its space-separated permissions.
+fn grant_includes(grant: &serde_json::Value, scope: &str) -> bool {
+    grant["scope"]
+        .as_str()
+        .is_some_and(|scopes| scopes.split(' ').any(|granted| granted == scope))
+}
+
 /// A client that reports redirects rather than following them.
 fn browser() -> reqwest::Client {
     reqwest::Client::builder()
@@ -229,7 +247,7 @@ async fn the_full_flow_yields_an_access_token_and_an_id_token() {
     assert_eq!(access["sub"], fixture.user_id);
     assert_eq!(access["upn"], fixture.user_principal_name);
     assert_eq!(access["appid"], fixture.client_id);
-    assert_eq!(access["scp"], "User.Read");
+    assert_eq!(graph_permissions(&access["scp"]), "User.Read");
     assert!(
         access["roles"].is_null(),
         "a delegated token must not carry app roles: {access}"
@@ -586,15 +604,15 @@ async fn a_refresh_token_is_issued_only_when_asked_for() {
     assert!(with["refresh_token"].is_string());
     // offline_access governs what is issued and is not a resource permission, so it does not
     // belong in the access token's scopes.
-    assert_eq!(
-        with["access_token"].as_str().map(|token| {
-            common::decode_claims(token)["scp"]
-                .as_str()
-                .unwrap()
-                .to_string()
-        }),
-        Some("User.Read".to_string())
+    let scp = common::decode_claims(with["access_token"].as_str().unwrap())["scp"].clone();
+    assert!(
+        !scp.as_str()
+            .unwrap()
+            .split(' ')
+            .any(|scope| scope == "offline_access"),
+        "{scp}"
     );
+    assert_eq!(graph_permissions(&scp), "User.Read");
 }
 
 #[tokio::test]
@@ -638,7 +656,7 @@ async fn a_refresh_token_yields_a_fresh_access_token_and_is_rotated() {
     let claims = common::decode_claims(refreshed["access_token"].as_str().unwrap());
     assert_eq!(claims["oid"], fixture.user_id);
     // The refresh cannot widen the grant.
-    assert_eq!(claims["scp"], "User.Read");
+    assert_eq!(graph_permissions(&claims["scp"]), "User.Read");
 
     // Entra rotates refresh tokens, so the presented one is consumed.
     let rotated = refreshed["refresh_token"].as_str().unwrap().to_string();
@@ -677,7 +695,19 @@ async fn a_sign_in_is_listed_with_its_refresh_token_masked() {
     assert_eq!(access["grant"], "authorization_code");
     assert_eq!(access["subjectId"], fixture.user_id);
     assert_eq!(access["clientId"], fixture.client_id);
-    assert_eq!(access["scopes"], json!(["User.Read"]));
+    assert!(
+        access["scopes"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("User.Read")),
+        "{access}"
+    );
+    assert!(
+        !access["scopes"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("offline_access"))
+    );
 
     let id = for_user[1];
     assert_eq!(id["kind"], "id");
@@ -709,7 +739,7 @@ async fn consent_is_recorded_in_the_directory() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|grant| grant["scope"].as_str() == Some("User.Read"))
+        .find(|grant| grant_includes(grant, "User.Read"))
         .unwrap_or_else(|| panic!("no grant recorded: {grants}"));
     assert_eq!(found["consentType"], "Principal");
     assert_eq!(found["principalId"], fixture.user_id);
@@ -731,7 +761,7 @@ async fn a_scope_the_resource_does_not_publish_is_not_granted() {
     .await;
     let claims = common::decode_claims(tokens["access_token"].as_str().unwrap());
     assert_eq!(
-        claims["scp"].as_str().unwrap_or_default(),
+        graph_permissions(&claims["scp"]),
         "",
         "an unpublished scope should not be granted: {claims}"
     );
@@ -1022,7 +1052,7 @@ async fn revoking_consent_narrows_a_refreshed_token() {
     )
     .await;
     assert_eq!(
-        common::decode_claims(first["access_token"].as_str().unwrap())["scp"],
+        graph_permissions(&common::decode_claims(first["access_token"].as_str().unwrap())["scp"]),
         "User.Read"
     );
     let refresh = first["refresh_token"].as_str().unwrap().to_string();
@@ -1033,7 +1063,7 @@ async fn revoking_consent_narrows_a_refreshed_token() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|grant| grant["scope"].as_str() == Some("User.Read"))
+        .find(|grant| grant_includes(grant, "User.Read"))
         .expect("the sign-in should have recorded a grant")["id"]
         .as_str()
         .unwrap()
@@ -1108,7 +1138,9 @@ async fn a_refresh_keeps_a_permission_that_is_still_consented() {
 
     let refreshed: serde_json::Value = response.json().await.unwrap();
     assert_eq!(
-        common::decode_claims(refreshed["access_token"].as_str().unwrap())["scp"],
+        graph_permissions(
+            &common::decode_claims(refreshed["access_token"].as_str().unwrap())["scp"]
+        ),
         "User.Read"
     );
     let _ = graph;
@@ -1284,7 +1316,7 @@ async fn one_sign_in_consents_to_two_apis_and_a_refresh_switches_between_them() 
     let refreshed: serde_json::Value = response.json().await.unwrap();
     let claims = common::decode_claims(refreshed["access_token"].as_str().unwrap());
     assert_eq!(claims["aud"], sim.public_base_url.as_str());
-    assert_eq!(claims["scp"], "User.Read");
+    assert_eq!(graph_permissions(&claims["scp"]), "User.Read");
 }
 
 #[tokio::test]
@@ -1499,7 +1531,7 @@ async fn a_refresh_naming_a_revoked_permission_is_narrowed_not_refused() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|grant| grant["scope"] == "User.Read")
+        .find(|grant| grant_includes(grant, "User.Read"))
         .unwrap()["id"]
         .as_str()
         .unwrap()
@@ -1523,7 +1555,7 @@ async fn a_refresh_naming_a_revoked_permission_is_narrowed_not_refused() {
     assert_eq!(response.status(), 200);
     let refreshed: serde_json::Value = response.json().await.unwrap();
     let claims = common::decode_claims(refreshed["access_token"].as_str().unwrap());
-    assert_eq!(claims["scp"], "");
+    assert_eq!(graph_permissions(&claims["scp"]), "");
 }
 
 /// The value of a hidden field in a form_post page.
@@ -1600,4 +1632,35 @@ async fn form_post_also_carries_errors() {
     assert_eq!(response.status(), 200);
     let page = response.text().await.unwrap();
     assert_eq!(form_field(&page, "error"), "invalid_resource");
+}
+
+#[tokio::test]
+async fn the_openid_connect_scopes_are_consented_on_graph_and_carried_in_its_tokens() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let fixture = fixture(&graph).await;
+
+    let tokens = complete_flow(
+        &sim,
+        &fixture,
+        "openid profile email offline_access User.Read",
+        Some(VERIFIER),
+    )
+    .await;
+    // Microsoft: these "are well-defined scopes that are also hosted on Microsoft Graph".
+    let claims = common::decode_claims(tokens["access_token"].as_str().unwrap());
+    let mut scp: Vec<&str> = claims["scp"].as_str().unwrap().split(' ').collect();
+    scp.sort();
+    assert_eq!(scp, ["User.Read", "email", "openid", "profile"]);
+
+    let grants = graph.get_ok("/v1.0/oauth2PermissionGrants").await;
+    let grant = grants["value"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|grant| grant_includes(grant, "User.Read"))
+        .unwrap();
+    for scope in ["openid", "profile", "email", "offline_access"] {
+        assert!(grant_includes(grant, scope), "{scope} missing from {grant}");
+    }
 }
