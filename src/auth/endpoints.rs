@@ -285,7 +285,11 @@ async fn refresh_token(
     // scope means a refresh can only ever narrow, never widen.
     let scope = {
         let directory = state.store.read().await;
-        let consented = directory.consented_scopes(&issued.client_id, &issued.user_id);
+        let graph_id = directory
+            .graph_service_principal()
+            .map(|graph| graph.id.clone())
+            .unwrap_or_default();
+        let consented = directory.consented_scopes(&issued.client_id, &issued.user_id, &graph_id);
         issued
             .scope
             .split_whitespace()

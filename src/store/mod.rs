@@ -80,6 +80,40 @@ impl Directory {
         self.service_principal_by_app_id(MICROSOFT_GRAPH_APP_ID)
     }
 
+    /// The service principal of the API a scope's resource part names.
+    ///
+    /// Entra accepts an API's application ID URI or its `appId` there. The application's
+    /// `identifierUris` are read rather than the principal's `servicePrincipalNames`, because
+    /// they are what an administrator edits; principals with no registration in this tenant,
+    /// such as Microsoft Graph, are found by their own names. `simulator_base_url` names Graph
+    /// too, because the metadata document advertises it as Graph's resource identifier and
+    /// the Terraform provider asks for exactly that.
+    pub fn resource_for(&self, name: &str, simulator_base_url: &str) -> Option<&ServicePrincipal> {
+        // Entra treats `api://orders` and `api://orders/` as the same resource.
+        let name = name.trim_end_matches('/');
+        if name == simulator_base_url.trim_end_matches('/') {
+            return self.graph_service_principal();
+        }
+
+        let registered = self.applications.values().find(|application| {
+            application.app_id.eq_ignore_ascii_case(name)
+                || application
+                    .identifier_uris
+                    .iter()
+                    .any(|uri| uri.trim_end_matches('/') == name)
+        });
+        if let Some(application) = registered {
+            return self.service_principal_by_app_id(&application.app_id);
+        }
+
+        self.service_principals.values().find(|principal| {
+            principal
+                .service_principal_names
+                .iter()
+                .any(|known| known.trim_end_matches('/').eq_ignore_ascii_case(name))
+        })
+    }
+
     /// The app role values granted to a principal on the Graph resource.
     ///
     /// This is what fills an app-only token's `roles` claim. Entra derives it by resolving the
@@ -89,12 +123,25 @@ impl Directory {
         let Some(resource) = self.graph_service_principal() else {
             return Vec::new();
         };
+        self.granted_role_values(&[principal_id.to_string()], &resource.id)
+    }
+
+    /// The app role values any of `principal_ids` holds on the resource `resource_id`.
+    ///
+    /// For an app-only token that is the client's own principal. For a user token it is the
+    /// user and the groups the user is a direct member of, because Entra resolves role
+    /// assignments made to a group for its members but does not follow nested groups.
+    pub fn granted_role_values(&self, principal_ids: &[String], resource_id: &str) -> Vec<String> {
+        let Some(resource) = self.service_principals.get(resource_id) else {
+            return Vec::new();
+        };
 
         let mut values: Vec<String> = self
             .app_role_assignments
             .values()
             .filter(|assignment| {
-                assignment.principal_id == principal_id && assignment.resource_id == resource.id
+                assignment.resource_id == resource.id
+                    && principal_ids.contains(&assignment.principal_id)
             })
             .filter_map(|assignment| {
                 resource
@@ -119,18 +166,20 @@ impl Directory {
     /// Read at the moment a token is issued rather than remembered from the sign-in, so that
     /// revoking a grant narrows the next token. Entra goes further and invalidates the refresh
     /// token outright; re-reading the directory reaches the same outcome by the shorter route.
-    pub fn consented_scopes(&self, client_app_id: &str, user_id: &str) -> Vec<String> {
+    pub fn consented_scopes(
+        &self,
+        client_app_id: &str,
+        user_id: &str,
+        resource_id: &str,
+    ) -> Vec<String> {
         let Some(client) = self.service_principal_by_app_id(client_app_id) else {
-            return Vec::new();
-        };
-        let Some(resource) = self.graph_service_principal() else {
             return Vec::new();
         };
 
         let mut scopes: Vec<String> = self
             .oauth2_permission_grants
             .values()
-            .filter(|grant| grant.client_id == client.id && grant.resource_id == resource.id)
+            .filter(|grant| grant.client_id == client.id && grant.resource_id == resource_id)
             .filter(|grant| {
                 // Tenant-wide consent covers every user; per-user consent covers only its own.
                 grant.consent_type == "AllPrincipals"
@@ -342,6 +391,90 @@ mod tests {
         assert!(
             json.contains(r#""hint""#),
             "the hint should still be published"
+        );
+    }
+
+    /// A directory holding an API registration `Orders` and its service principal.
+    fn directory_with_orders_api() -> (Directory, Config, String) {
+        let (mut directory, config) = directory_with_bootstrap();
+        let mut orders = model::Application::new(
+            "orders-object".to_string(),
+            "aaaaaaaa-0000-0000-0000-00000000000a".to_string(),
+            "Orders".to_string(),
+        );
+        orders.identifier_uris = vec!["api://orders".to_string()];
+        let principal = ServicePrincipal::for_application("orders-principal".to_string(), &orders);
+        directory.applications.insert(orders.id.clone(), orders);
+        directory
+            .service_principals
+            .insert(principal.id.clone(), principal);
+        (directory, config, "orders-principal".to_string())
+    }
+
+    #[test]
+    fn an_api_is_found_by_its_identifier_uri_or_app_id() {
+        let (directory, config, orders) = directory_with_orders_api();
+        let base = config.public_base_url();
+
+        for name in [
+            "api://orders",
+            "api://orders/",
+            "aaaaaaaa-0000-0000-0000-00000000000a",
+        ] {
+            assert_eq!(
+                directory.resource_for(name, &base).map(|sp| sp.id.as_str()),
+                Some(orders.as_str()),
+                "{name} should name Orders"
+            );
+        }
+    }
+
+    #[test]
+    fn graph_is_found_by_its_real_name_and_by_the_simulator_url() {
+        let (directory, config, _) = directory_with_orders_api();
+        let base = config.public_base_url();
+        let graph = directory.graph_service_principal().unwrap().id.clone();
+
+        for name in [
+            "https://graph.microsoft.com",
+            MICROSOFT_GRAPH_APP_ID,
+            base.as_str(),
+        ] {
+            assert_eq!(
+                directory.resource_for(name, &base).map(|sp| sp.id.clone()),
+                Some(graph.clone()),
+                "{name} should name Graph"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_resource_is_not_found() {
+        let (directory, config, _) = directory_with_orders_api();
+        assert!(
+            directory
+                .resource_for("api://nothing-registered", &config.public_base_url())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn an_identifier_uri_added_after_the_principal_still_resolves() {
+        let (mut directory, config, orders) = directory_with_orders_api();
+        // Terraform sets identifierUris in a separate PATCH after the principal exists, and the
+        // principal's own names are not updated by that.
+        directory
+            .applications
+            .get_mut("orders-object")
+            .unwrap()
+            .identifier_uris
+            .push("https://orders.example.test".to_string());
+
+        assert_eq!(
+            directory
+                .resource_for("https://orders.example.test", &config.public_base_url())
+                .map(|sp| sp.id.as_str()),
+            Some(orders.as_str())
         );
     }
 

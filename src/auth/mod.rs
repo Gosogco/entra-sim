@@ -8,5 +8,6 @@ pub mod oauth_error;
 pub mod oidc;
 pub mod permissions;
 pub mod pkce;
+pub mod scopes;
 pub mod sessions;
 pub mod token;
