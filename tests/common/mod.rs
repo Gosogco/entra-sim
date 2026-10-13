@@ -287,6 +287,11 @@ pub struct Graph {
 }
 
 impl Graph {
+    /// The bearer token this client presents.
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
     fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
         self.client
             .request(method, format!("{}{}", self.base_url, path))

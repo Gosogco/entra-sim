@@ -11,6 +11,7 @@
 
 pub mod app_role_assignments;
 pub mod applications;
+pub mod batch;
 pub mod directory_roles;
 pub mod error;
 pub mod groups;
@@ -44,6 +45,7 @@ pub fn router() -> Router<AppState> {
 
 fn resources() -> Router<AppState> {
     Router::new()
+        .route("/$batch", axum::routing::post(batch::batch))
         .merge(users::router())
         .merge(groups::router())
         .merge(applications::router())

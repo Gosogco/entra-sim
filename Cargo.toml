@@ -28,6 +28,7 @@ x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 sha1 = "0.10"
 # Fetches an external issuer's signing keys, to check a federated identity credential.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tower = { version = "0.5", features = ["util"] }
 
 [dev-dependencies]
 base64 = "0.23.1"
