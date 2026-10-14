@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Identity endpoints · entra-sim</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<nav class="site" aria-label="Documentation">
+<a class="brand" href="index.html">entra-sim</a>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="concepts.html">Entra concepts</a></li>
+<li><a href="running.html">Running</a></li>
+<li><a href="configuration.html">Configuration</a></li>
+<li><a href="identity.html" aria-current="page">Identity endpoints</a></li>
+<li><a href="tokens.html">Tokens</a></li>
+<li><a href="graph.html">Microsoft Graph</a></li>
+<li><a href="clients.html">Connecting clients</a></li>
+<li><a href="testing.html">Testing and the studio</a></li>
+<li><a href="internals.html">Internals</a></li>
+<li><a href="limits.html">Limits</a></li>
+</ul>
+</nav>
+<main>
+<h1>Identity endpoints</h1>
+<p class="lead">The OAuth 2.0 and OpenID Connect side: discovery, the grants, client authentication, the sign-in page, and the policies applied when a token is issued.</p>
+
+<div class="toc"><ul>
+<li><a href="#endpoints">Endpoints</a></li>
+<li><a href="#scopes">How a scope names an API</a></li>
+<li><a href="#grants">Grants</a></li>
+<li><a href="#client-auth">Client authentication</a></li>
+<li><a href="#sign-in">The sign-in page and sessions</a></li>
+<li><a href="#assignment">Assignment required</a></li>
+<li><a href="#tenants">More than one tenant</a></li>
+<li><a href="#conditional-access">Conditional access</a></li>
+<li><a href="#errors">Error codes</a></li>
+</ul></div>
+
+<h2 id="endpoints">Endpoints</h2>
+<p><code>{tenant}</code> is the tenant GUID, its domain, <code>common</code>, <code>organizations</code> or
+<code>consumers</code>. A tenant the simulator does not serve gives <code>AADSTS90002</code>.</p>
+<div class="table-wrap"><table>
+<tr><th>Method and path</th><th>Purpose</th></tr>
+<tr><td><code>GET /metadata/endpoints</code></td><td>Azure cloud metadata. The Terraform provider reads it.</td></tr>
+<tr><td><code>GET /{tenant}/v2.0/.well-known/openid-configuration</code></td><td>OIDC discovery, v2.0</td></tr>
+<tr><td><code>GET /{tenant}/.well-known/openid-configuration</code></td><td>v1.0 discovery: the v1.0 issuer and the keys only</td></tr>
+<tr><td><code>GET /{tenant}/discovery/v2.0/keys</code><br><code>GET /{tenant}/discovery/keys</code></td><td>JWKS. Both serve the same key.</td></tr>
+<tr><td><code>GET /{tenant}/oauth2/v2.0/authorize</code></td><td>Starts a sign-in and shows the sign-in page</td></tr>
+<tr><td><code>POST /{tenant}/oauth2/v2.0/authorize</code></td><td>The sign-in page's form submission</td></tr>
+<tr><td><code>POST /{tenant}/oauth2/v2.0/token</code></td><td>Every grant</td></tr>
+<tr><td><code>POST /{tenant}/oauth2/v2.0/devicecode</code></td><td>Starts a device code sign-in</td></tr>
+<tr><td><code>GET /devicelogin</code>, <code>POST /devicelogin</code></td><td>The device code verification page</td></tr>
+<tr><td><code>GET /{tenant}/oauth2/v2.0/logout</code></td><td>Ends the browser session</td></tr>
+<tr><td><code>GET /oidc/userinfo</code>, <code>POST /oidc/userinfo</code></td><td>UserInfo, with a Graph token that has the <code>openid</code> scope</td></tr>
+</table></div>
+
+<p>The v2.0 discovery document advertises:</p>
+<div class="table-wrap"><table>
+<tr><th>Field</th><th>Value</th></tr>
+<tr><td><code>issuer</code></td><td><code>https://{public-host}/{tenant-id}/v2.0</code>. It always names the concrete tenant, never an alias.</td></tr>
+<tr><td><code>response_types_supported</code></td><td><code>code</code></td></tr>
+<tr><td><code>response_modes_supported</code></td><td><code>query</code>, <code>fragment</code>, <code>form_post</code></td></tr>
+<tr><td><code>grant_types_supported</code></td><td><code>authorization_code</code>, <code>refresh_token</code>, <code>client_credentials</code>, <code>urn:ietf:params:oauth:grant-type:jwt-bearer</code>, <code>urn:ietf:params:oauth:grant-type:device_code</code>, <code>password</code></td></tr>
+<tr><td><code>token_endpoint_auth_methods_supported</code></td><td><code>client_secret_post</code>, <code>client_secret_basic</code>, <code>private_key_jwt</code></td></tr>
+<tr><td><code>code_challenge_methods_supported</code></td><td><code>S256</code>, <code>plain</code></td></tr>
+<tr><td><code>scopes_supported</code></td><td><code>openid</code>, <code>profile</code>, <code>email</code>, <code>offline_access</code></td></tr>
+<tr><td><code>msgraph_host</code>, <code>cloud_instance_name</code></td><td>The public host, because the simulator is also Graph</td></tr>
+</table></div>
+
+<h2 id="scopes">How a scope names an API</h2>
+<p>A token is for one API. The <code>scope</code> parameter names it, as in Entra:</p>
+<ul>
+<li><code>{resource}/{value}</code> or <code>{resource}/.default</code>, where <code>{resource}</code> is one of the API application's <code>identifierUris</code> or its <code>appId</code>. <code>.default</code> asks for every permission already granted.</li>
+<li>A bare value such as <code>User.Read</code> names Microsoft Graph.</li>
+<li><code>https://graph.microsoft.com</code> and the simulator's own base URL (<code>https://localhost:8443</code> by default) both name Graph. Nothing is sent to Microsoft; the name is only matched.</li>
+<li><code>openid</code>, <code>profile</code>, <code>email</code> and <code>offline_access</code> govern what is issued, not which API.</li>
+</ul>
+<p>The API must have a service principal in the tenant. An unknown API gives <code>400 invalid_resource</code>
+with <code>AADSTS500011</code>. Scopes for two APIs in one token request give <code>AADSTS700022</code>. A sign-in
+may name scopes on several APIs: consent is recorded for each, and the code is redeemed for the API in the
+token request's own <code>scope</code>, or the first API the sign-in named. A sign-in that names no API yields a
+Graph token. A scope value the API does not publish is never consented and never reaches <code>scp</code>.</p>
+
+<h2 id="grants">Grants</h2>
+
+<h3 id="client-credentials">Client credentials</h3>
+<pre><code>POST /{tenant}/oauth2/v2.0/token
+grant_type=client_credentials
+client_id=…
+client_secret=…           (or client_assertion and client_assertion_type)
+scope={resource}/.default</code></pre>
+<p>The client must authenticate. The token's <code>roles</code> are the values of the app roles assigned to the
+client's service principal on that API, read from the directory at issuance, so deleting an assignment changes
+the next token. The scope must end in <code>/.default</code>; anything else gives <code>AADSTS70011</code>.</p>
+
+<h3 id="authorization-code">Authorization code, with or without PKCE</h3>
+<pre><code>GET /{tenant}/oauth2/v2.0/authorize?client_id=…&amp;response_type=code
+    &amp;redirect_uri=…&amp;scope=openid offline_access User.Read&amp;state=…
+    &amp;code_challenge=…&amp;code_challenge_method=S256
+    [&amp;response_mode=query|fragment|form_post] [&amp;prompt=…] [&amp;login_hint=…] [&amp;nonce=…]</code></pre>
+<p>The authorize request is checked before any page is shown. These failures are displayed rather than
+redirected, because the redirect target is not trusted yet:</p>
+<ul>
+<li>The client is unknown (<code>AADSTS700016</code>) or has no service principal (<code>AADSTS650052</code>).</li>
+<li>The <code>redirect_uri</code> is not among the application's <code>web</code>, <code>spa</code> or <code>publicClient</code> redirect URIs (<code>AADSTS50011</code>).</li>
+<li><code>response_type</code> is not <code>code</code> (<code>AADSTS70005</code>). The implicit and hybrid flows are not implemented.</li>
+<li><code>code_challenge_method</code> is neither <code>S256</code> nor <code>plain</code>.</li>
+</ul>
+<p>After sign-in the code is returned according to <code>response_mode</code>: in the query string, in the URL
+fragment (which <code>msal-browser</code> uses), or as an HTML page that posts a form with <code>code</code> and
+<code>state</code> to the redirect URI. A code lives 10 minutes and is redeemed once:</p>
+<pre><code>POST /{tenant}/oauth2/v2.0/token
+grant_type=authorization_code&amp;client_id=…&amp;code=…&amp;redirect_uri=…&amp;code_verifier=…</code></pre>
+<div class="table-wrap"><table>
+<tr><th>Check at redemption</th><th>Failure</th></tr>
+<tr><td>The code exists and is unused</td><td><code>invalid_grant</code>, <code>AADSTS54005</code></td></tr>
+<tr><td><code>client_id</code> is the client the code was issued to</td><td><code>AADSTS70000</code></td></tr>
+<tr><td><code>redirect_uri</code> is the one in the authorize request</td><td><code>AADSTS50011</code></td></tr>
+<tr><td><code>code_verifier</code> matches the challenge; a verifier without a challenge, or a challenge without a verifier, is refused</td><td><code>AADSTS501481</code></td></tr>
+<tr><td>A client secret or assertion, when presented, is valid</td><td><code>AADSTS7000215</code> and the assertion codes</td></tr>
+<tr><td>The code was issued in this tenant, unless redeemed through <code>common</code> or <code>organizations</code></td><td><code>AADSTS700005</code></td></tr>
+</table></div>
+<p>The response holds <code>access_token</code>, <code>id_token</code> when <code>openid</code> was asked for, and
+<code>refresh_token</code> when <code>offline_access</code> was asked for.</p>
+
+<h3 id="refresh">Refresh token</h3>
+<pre><code>POST /{tenant}/oauth2/v2.0/token
+grant_type=refresh_token&amp;client_id=…&amp;refresh_token=…[&amp;scope=…]</code></pre>
+<p>Refresh tokens live 90 days and are rotated: each use returns a new one and the old one stops working
+(<code>AADSTS700082</code>). A refresh token works for any API the user consented to for that client. One issued
+to another client gives <code>AADSTS70000</code>. A conditional access policy that needs MFA the original sign-in
+did not do gives <code>interaction_required</code>.</p>
+
+<h3 id="on-behalf-of">On-behalf-of</h3>
+<pre><code>POST /{tenant}/oauth2/v2.0/token
+grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer
+requested_token_use=on_behalf_of
+assertion={a user token for the middle-tier API}
+client_id=…&amp;client_secret=…
+scope={downstream API scopes}</code></pre>
+<p>A middle-tier API exchanges a user's token for a token for another API. The rules follow Microsoft's
+on-behalf-of documentation:</p>
+<ul>
+<li>The client must authenticate.</li>
+<li>The assertion must be a token this simulator issued, v1.0 or v2.0, whose <code>aud</code> is the calling application, and it must be a user token. Otherwise <code>AADSTS50013</code>.</li>
+<li><code>scp</code> comes from consent the user gave the middle tier for the downstream API. Without it, <code>invalid_grant</code> with <code>AADSTS65001</code>.</li>
+<li><code>roles</code> are the user's own roles on the downstream API, never the middle tier's.</li>
+<li>MFA carries over when the assertion's <code>amr</code> includes <code>mfa</code>.</li>
+<li>A refresh token is returned when <code>offline_access</code> is requested.</li>
+</ul>
+
+<h3 id="device-code">Device code</h3>
+<pre><code>POST /{tenant}/oauth2/v2.0/devicecode
+client_id=…&amp;scope=…</code></pre>
+<p>The response holds <code>device_code</code>, <code>user_code</code> (nine characters without look-alikes),
+<code>verification_uri</code> (<code>https://{public-host}/devicelogin</code>), <code>expires_in</code> (900),
+<code>interval</code> (5) and <code>message</code>. On the verification page the user enters the code, picks a
+user, and may decline. The device polls:</p>
+<pre><code>POST /{tenant}/oauth2/v2.0/token
+grant_type=urn:ietf:params:oauth:grant-type:device_code&amp;client_id=…&amp;device_code=…</code></pre>
+<div class="table-wrap"><table>
+<tr><th>State</th><th>Error</th></tr>
+<tr><td>The user has not finished</td><td><code>authorization_pending</code> (<code>AADSTS70016</code>)</td></tr>
+<tr><td>The user declined</td><td><code>authorization_declined</code> (<code>AADSTS65004</code>)</td></tr>
+<tr><td>The device code is unknown</td><td><code>bad_verification_code</code> (<code>AADSTS70018</code>)</td></tr>
+<tr><td>15 minutes have passed</td><td><code>expired_token</code> (<code>AADSTS70019</code>)</td></tr>
+</table></div>
+
+<h3 id="password">Password (resource owner password credentials)</h3>
+<pre><code>POST /{tenant}/oauth2/v2.0/token
+grant_type=password&amp;client_id=…&amp;username=…&amp;password=…&amp;scope=…</code></pre>
+<ul>
+<li>Refused on <code>common</code> and <code>consumers</code> (<code>AADSTS90023</code>); <code>organizations</code> and a tenant are accepted.</li>
+<li>The application is a public client when its <code>isFallbackPublicClient</code> is <code>true</code>. A public client must not send a secret or assertion (<code>AADSTS700025</code>); a confidential client must (<code>AADSTS7000218</code>).</li>
+<li>The password is the one set in the user's <code>passwordProfile</code>. A wrong password, or a user without one, gives <code>AADSTS50126</code>. A disabled user gives <code>AADSTS50057</code>.</li>
+<li>Scopes not yet consented give <code>consent_required</code> (<code>AADSTS65001</code>). There is no page to consent on.</li>
+<li>A conditional access policy that needs MFA gives <code>interaction_required</code> (<code>AADSTS50076</code>).</li>
+</ul>
+
+<h3 id="userinfo">UserInfo</h3>
+<p><code>/oidc/userinfo</code> takes a Graph access token whose <code>scp</code> includes <code>openid</code>. It returns
+<code>sub</code>; <code>name</code>, <code>given_name</code>, <code>family_name</code> and <code>picture</code> when <code>profile</code> was granted;
+and <code>email</code> when <code>email</code> was granted and the user has a mail address. A token for another API, or an app-only token, is refused.</p>
+
+<h2 id="client-auth">Client authentication</h2>
+<p>A confidential client authenticates with one of:</p>
+<div class="table-wrap"><table>
+<tr><th>Credential</th><th>How it is checked</th><th><code>appidacr</code> / <code>azpacr</code></th></tr>
+<tr><td>Client secret, in the body or with HTTP Basic</td><td>Against the application's <code>passwordCredentials</code>, including their start and end dates. Wrong: <code>AADSTS7000215</code>.</td><td><code>1</code></td></tr>
+<tr><td>Certificate assertion</td><td>A JWT signed with the private key of a certificate in the application's <code>keyCredentials</code>, found by the <code>x5t#S256</code> header or the older <code>x5t</code>. PS256 and RS256 are accepted. <code>aud</code> is the token endpoint URL, <code>iss</code> and <code>sub</code> are the client ID, and <code>jti</code>, <code>nbf</code> and <code>exp</code> are required. A bad signature gives <code>AADSTS700027</code>; bad claims give <code>AADSTS50027</code>.</td><td><code>2</code></td></tr>
+<tr><td>Federated identity credential</td><td>A JWT from an external issuer, such as a GitHub Actions token. Its <code>iss</code>, <code>sub</code> and <code>aud</code> must match one of the application's federated identity credentials exactly (<code>AADSTS70021</code> otherwise). The simulator then fetches the issuer's <code>/.well-known/openid-configuration</code> and keys over HTTPS and checks the signature. A token issued by the simulator itself is refused (<code>AADSTS700229</code>).</td><td><code>2</code></td></tr>
+</table></div>
+<p>Assertions are sent as <code>client_assertion</code> with
+<code>client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer</code>, on every grant that
+takes a secret. A public client sends nothing and gets <code>0</code>.</p>
+<p class="note">Federated credentials are the only feature that makes outbound network requests.</p>
+
+<h2 id="sign-in">The sign-in page and sessions</h2>
+<p>The sign-in page lists the tenant's users and the permissions the client requests. It is self-contained and
+works without network access. Choosing a user records consent as an <code>oauth2PermissionGrant</code>, so
+<code>scp</code> comes from the directory: a client cannot widen its own token, an operator sees the consent with
+<code>GET /v1.0/oauth2PermissionGrants</code>, and deleting the grant narrows the next token.
+<code>{resource}/.default</code> applies static consent: every permission on the client's registration
+(<code>requiredResourceAccess</code>), including APIs that list the client in
+<code>api.knownClientApplications</code>. A client listed in an API's <code>api.preAuthorizedApplications</code>
+needs no consent for the listed scopes.</p>
+<p>Signing in sets the cookie <code>entra_sim_session</code> for 24 hours. With it:</p>
+<div class="table-wrap"><table>
+<tr><th>Parameter</th><th>Behaviour</th></tr>
+<tr><td>none</td><td>A browser with a session and the needed consent signs in without a page.</td></tr>
+<tr><td><code>prompt=none</code></td><td>Signs in silently. Without a session it redirects with <code>login_required</code> (<code>AADSTS50058</code>); when consent is missing, with <code>interaction_required</code> (<code>AADSTS65001</code>).</td></tr>
+<tr><td><code>prompt=login</code></td><td>Shows the user picker even with a session.</td></tr>
+<tr><td><code>prompt=select_account</code></td><td>Shows the user picker even with a session.</td></tr>
+<tr><td><code>prompt=consent</code></td><td>Shows the consent step even when consent exists.</td></tr>
+<tr><td><code>login_hint</code></td><td>Lists the user with that user principal name first. A session for a different user is not reused.</td></tr>
+</table></div>
+<p><code>/{tenant}/oauth2/v2.0/logout</code> clears the session. <code>--auto-sign-in-user {upn}</code> signs that user
+in without a page for tests that cannot drive a browser; <code>prompt=login</code> still forces the page.</p>
+
+<h2 id="assignment">Assignment required</h2>
+<p>When an API's service principal has <code>appRoleAssignmentRequired</code> set to <code>true</code>:</p>
+<ul>
+<li>A user gets a token for it only when the user, or a security group the user is a direct member of, holds an app role assignment on it. The default access role (the all-zero GUID) counts. Global Administrators are exempt. Otherwise <code>AADSTS50105</code>.</li>
+<li>A client credentials token needs an assignment of the client on it. Otherwise <code>AADSTS501051</code>.</li>
+</ul>
+
+<h2 id="tenants">More than one tenant</h2>
+<p><code>--additional-tenant TENANT_ID=DOMAIN</code> (<code>ENTRA_SIM_ADDITIONAL_TENANTS</code>, comma-separated) serves more
+tenants beside the primary one. Each has its own directory with Microsoft Graph and the bootstrap client.</p>
+<ul>
+<li>The identity endpoints take the tenant from the path. Graph takes it from the token's <code>tid</code>.</li>
+<li>Through <code>common</code> or <code>organizations</code>, the sign-in page offers every tenant's users. The user signs in to their own tenant, and <code>iss</code> and <code>tid</code> name it.</li>
+<li>An application with <code>signInAudience</code> <code>AzureADMultipleOrgs</code> or <code>AzureADandPersonalMicrosoftAccount</code> gets a service principal in the user's tenant on consent.</li>
+<li>A single-tenant application used through an alias gives <code>AADSTS50194</code>. A user from another tenant on a tenant-specific path gives <code>AADSTS50020</code>.</li>
+<li>A code or refresh token redeemed on another tenant's path gives <code>AADSTS700005</code>.</li>
+<li>The <code>/__sim__</code> endpoints act on the primary tenant, except <code>reset</code>, which resets every tenant.</li>
+</ul>
+
+<h2 id="conditional-access">Conditional access</h2>
+<p>Policies are managed through Graph at <code>/identity/conditionalAccess/policies</code>, with Microsoft's
+<code>conditionalAccessPolicy</code> shape, so <code>azuread_conditional_access_policy</code> works. They are
+evaluated whenever a user token is issued: on the sign-in page, the device code page, and the password,
+refresh and on-behalf-of grants.</p>
+<div class="table-wrap"><table>
+<tr><th><code>state</code></th><th>Effect</th></tr>
+<tr><td><code>enabled</code></td><td>Enforced</td></tr>
+<tr><td><code>enabledForReportingButNotEnforced</code></td><td>Evaluated and logged, never enforced</td></tr>
+<tr><td><code>disabled</code></td><td>Ignored</td></tr>
+</table></div>
+<p>A policy applies when all its conditions match:</p>
+<ul>
+<li><strong>Users:</strong> <code>includeUsers</code> (including <code>All</code> and <code>GuestsOrExternalUsers</code>), <code>includeGroups</code> (transitive membership), <code>includeRoles</code> (role template IDs, including active PIM assignments), <code>includeGuestsOrExternalUsers</code>, and the matching exclusions.</li>
+<li><strong>Applications:</strong> <code>includeApplications</code> and <code>excludeApplications</code>, matched against the client and the API. A policy for user actions or authentication contexts never applies to a sign-in.</li>
+<li><strong>Client app types:</strong> <code>browser</code> for the sign-in page, <code>mobileAppsAndDesktopClients</code> for the device code, password and on-behalf-of grants, and <code>all</code>.</li>
+<li><strong>Locations, platforms, devices, risk, authentication flows:</strong> the simulator has no such data. A policy that restricts one of them never applies; one that covers everything (<code>All</code> locations, <code>all</code> platforms, no risk levels) does.</li>
+<li>A policy without a <code>users</code> condition (a workload identity policy) never applies.</li>
+</ul>
+<div class="table-wrap"><table>
+<tr><th>Grant control</th><th>Result</th></tr>
+<tr><td><code>block</code></td><td>Refused with <code>AADSTS53003</code></td></tr>
+<tr><td><code>mfa</code>, or an <code>authenticationStrength</code></td><td>The sign-in page and the device code page add an "Approve sign-in" step. Tokens that carry <code>amr</code> then include <code>mfa</code> in it (see <a href="tokens.html#amr"><code>amr</code></a>). Grants without a page answer <code>interaction_required</code> with <code>AADSTS50076</code>.</td></tr>
+<tr><td><code>compliantDevice</code></td><td>Cannot be met: <code>AADSTS53000</code></td></tr>
+<tr><td><code>domainJoinedDevice</code></td><td>Cannot be met: <code>AADSTS53001</code></td></tr>
+<tr><td>Any other control, terms of use, custom controls</td><td>Cannot be met: <code>AADSTS53003</code></td></tr>
+</table></div>
+<p>With <code>operator</code> <code>OR</code>, MFA satisfies the policy when it is among the controls. With <code>AND</code>,
+every control must be met.</p>
+
+<h2 id="errors">Error codes</h2>
+<p>Token endpoint errors use Entra's body: <code>error</code>, <code>error_description</code> beginning with the
+<code>AADSTS</code> code, <code>error_codes</code>, <code>timestamp</code>, <code>trace_id</code> and
+<code>correlation_id</code>.</p>
+<div class="table-wrap"><table>
+<tr><th>Code</th><th><code>error</code></th><th>Cause</th></tr>
+<tr><td>900144</td><td><code>invalid_request</code></td><td>A required parameter is missing</td></tr>
+<tr><td>90002</td><td><code>invalid_tenant</code></td><td>The tenant is not served</td></tr>
+<tr><td>90023</td><td><code>invalid_request</code></td><td>Password grant on <code>common</code> or <code>consumers</code></td></tr>
+<tr><td>70003</td><td><code>unsupported_grant_type</code></td><td>Unknown <code>grant_type</code></td></tr>
+<tr><td>700016</td><td><code>unauthorized_client</code></td><td>Unknown client ID</td></tr>
+<tr><td>7000215</td><td><code>invalid_client</code></td><td>Wrong client secret</td></tr>
+<tr><td>7000218</td><td><code>invalid_client</code></td><td>A confidential client sent no credential</td></tr>
+<tr><td>700025</td><td><code>invalid_client</code></td><td>A public client sent a credential</td></tr>
+<tr><td>700027</td><td><code>invalid_client</code></td><td>Client assertion signature failed</td></tr>
+<tr><td>50027</td><td><code>invalid_client</code></td><td>Client assertion claims are invalid</td></tr>
+<tr><td>70021</td><td><code>invalid_request</code></td><td>No federated identity credential matches</td></tr>
+<tr><td>700229</td><td><code>invalid_request</code></td><td>A simulator-issued token used as a federated assertion</td></tr>
+<tr><td>70011</td><td><code>invalid_scope</code></td><td>Malformed scope, or client credentials without <code>/.default</code></td></tr>
+<tr><td>700022</td><td><code>invalid_scope</code></td><td>Scopes for more than one API</td></tr>
+<tr><td>500011</td><td><code>invalid_resource</code></td><td>The API is not in the directory</td></tr>
+<tr><td>65001</td><td><code>consent_required</code> or <code>invalid_grant</code></td><td>Missing consent</td></tr>
+<tr><td>50105</td><td><code>invalid_grant</code></td><td>User not assigned to an API that requires assignment</td></tr>
+<tr><td>501051</td><td><code>invalid_grant</code></td><td>Client not assigned to an API that requires assignment</td></tr>
+<tr><td>54005</td><td><code>invalid_grant</code></td><td>Code already redeemed or unknown</td></tr>
+<tr><td>70000</td><td><code>invalid_grant</code></td><td>Code or refresh token issued to another client</td></tr>
+<tr><td>50011</td><td><code>invalid_grant</code></td><td>Redirect URI mismatch</td></tr>
+<tr><td>501481</td><td><code>invalid_grant</code></td><td>PKCE verification failed</td></tr>
+<tr><td>700082</td><td><code>invalid_grant</code></td><td>Refresh token expired or already used</td></tr>
+<tr><td>700005</td><td><code>invalid_grant</code></td><td>Code or refresh token from another tenant</td></tr>
+<tr><td>50013</td><td><code>invalid_grant</code></td><td>Invalid on-behalf-of assertion</td></tr>
+<tr><td>50126</td><td><code>invalid_grant</code></td><td>Wrong username or password</td></tr>
+<tr><td>50057</td><td><code>invalid_grant</code></td><td>The user is disabled</td></tr>
+<tr><td>50034</td><td><code>invalid_grant</code></td><td>The user no longer exists</td></tr>
+<tr><td>50076</td><td><code>interaction_required</code></td><td>MFA is required and the grant has no page</td></tr>
+<tr><td>53000, 53001, 53003</td><td><code>invalid_grant</code></td><td>Blocked by conditional access</td></tr>
+<tr><td>70016, 65004, 70018, 70019</td><td>see <a href="#device-code">device code</a></td><td>Device code polling states</td></tr>
+</table></div>
+<p>Shown on the sign-in page rather than returned: <code>AADSTS50011</code>, <code>AADSTS70005</code>,
+<code>AADSTS650052</code>, <code>AADSTS50194</code>, <code>AADSTS50020</code>. Redirected to the client:
+<code>AADSTS50058</code>.</p>
+</main>
+</div>
+</body>
+</html>

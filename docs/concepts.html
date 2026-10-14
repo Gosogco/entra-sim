@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entra concepts · entra-sim</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<nav class="site" aria-label="Documentation">
+<a class="brand" href="index.html">entra-sim</a>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="concepts.html" aria-current="page">Entra concepts</a></li>
+<li><a href="running.html">Running</a></li>
+<li><a href="configuration.html">Configuration</a></li>
+<li><a href="identity.html">Identity endpoints</a></li>
+<li><a href="tokens.html">Tokens</a></li>
+<li><a href="graph.html">Microsoft Graph</a></li>
+<li><a href="clients.html">Connecting clients</a></li>
+<li><a href="testing.html">Testing and the studio</a></li>
+<li><a href="internals.html">Internals</a></li>
+<li><a href="limits.html">Limits</a></li>
+</ul>
+</nav>
+<main>
+<h1>Entra concepts</h1>
+<p class="lead">The background needed to read the rest of the documentation. Skip it if you know Entra.</p>
+
+<h2 id="tenant">Tenant</h2>
+<p>A tenant is one directory. It holds users, groups and applications, and has a GUID and at least one
+domain name. The simulator serves the tenant <code>00000000-0000-0000-0000-000000000001</code> with the
+domain <code>entra-sim.test</code> by default, and can serve <a href="identity.html#tenants">more tenants</a>.
+A path can name a tenant by GUID or by domain. Entra also accepts the aliases <code>common</code>,
+<code>organizations</code> and <code>consumers</code>, and the simulator accepts all three.</p>
+
+<h2 id="users-groups">Users and groups</h2>
+<p>A user's main name is its <code>userPrincipalName</code>, for example <code>alice@entra-sim.test</code>,
+compared without case. A group holds users, other groups and service principals. Members are not part of
+the group object; they are read and changed through separate paths:</p>
+<pre><code>GET    /v1.0/groups/{id}                    the group, with no members
+GET    /v1.0/groups/{id}/members            direct members
+GET    /v1.0/groups/{id}/transitiveMembers  members of nested groups as well
+POST   /v1.0/groups/{id}/members/$ref       {"@odata.id": "https://graph.microsoft.com/v1.0/directoryObjects/{member-id}"}</code></pre>
+<p>The URL in <code>@odata.id</code> names the real Graph host. Only the last path segment is read.</p>
+
+<h2 id="app-sp">Application and service principal</h2>
+<p>An app in Entra is two objects:</p>
+<div class="table-wrap"><table>
+<tr><th>Object</th><th>What it is</th></tr>
+<tr><td>Application (app registration)</td><td>The definition: secrets, certificates, redirect URIs, the permissions it requests, the app roles and scopes it defines as an API.</td></tr>
+<tr><td>Service principal (enterprise app)</td><td>The identity in one tenant. Assignments point at it, and app-only tokens represent it.</td></tr>
+</table></div>
+<p>An application has an object ID (<code>id</code>), used in Graph paths, and a client ID (<code>appId</code>),
+used at the token endpoint. Entra generates both. Microsoft Graph is itself an application with the
+<code>appId</code> <code>00000003-0000-0000-c000-000000000000</code>; a tenant holds only its service principal.</p>
+
+<h2 id="roles-scopes">App roles and delegated scopes</h2>
+<div class="table-wrap"><table>
+<tr><th>Type</th><th>Token claim</th><th>Held by</th><th>Granted by</th></tr>
+<tr><td>App role</td><td><code>roles</code></td><td>An application acting as itself, or a user, or a group's members</td><td>An <code>appRoleAssignment</code>: <code>principalId</code>, <code>resourceId</code> (the API's service principal), <code>appRoleId</code></td></tr>
+<tr><td>Delegated scope</td><td><code>scp</code></td><td>An application acting for a signed-in user</td><td>Consent, recorded as an <code>oauth2PermissionGrant</code></td></tr>
+</table></div>
+<p>Every API defines its own roles and scopes, and a role or scope means something only in a token for the
+API that defines it. A permission can exist in both forms with different GUIDs. For Graph,
+<code>Application.ReadWrite.All</code> is the app role <code>1bfefb4e-e0b5-418b-a88f-73c46d2cc8e9</code> and the
+delegated scope <code>bdfbf15f-ee85-4955-8675-146e8e5296b5</code>. Terraform configurations name them by these
+GUIDs, which is why the simulator carries Microsoft's catalogue (see <a href="internals.html#generated">generated data</a>).</p>
+
+<h2 id="directory-roles">Directory roles</h2>
+<p>A directory role, such as Global Administrator, gives administrative rights over the directory. Entra has
+built-in role templates; a template is activated into a <code>directoryRole</code> object, which then has
+members. <code>/roleManagement/directory</code> is a newer view over the same roles. Privileged Identity
+Management (PIM) makes a user eligible for a role, to activate for a limited time. An administrative unit
+narrows a role to the users and groups in that unit.</p>
+
+<h2 id="tokens">Tokens</h2>
+<p>Entra issues RS256-signed JSON Web Tokens. A client validates one by reading <code>kid</code> from the
+header, fetching the OIDC discovery document, following its <code>jwks_uri</code>, finding the key with that
+<code>kid</code>, and checking the signature, <code>aud</code>, <code>iss</code> and <code>exp</code>. An app-only
+token carries <code>roles</code>; a user token carries <code>scp</code>, and <code>roles</code> when the user holds
+app roles on the API. <a href="tokens.html">Tokens</a> lists every claim the simulator issues.</p>
+
+<h2 id="flows">The main flows</h2>
+<h3>Client credentials</h3>
+<p>A service gets a token for itself. <code>scope</code> is <code>{api}/.default</code>, which means "every app
+role I hold on that API".</p>
+<pre><code>POST /{tenant}/oauth2/v2.0/token
+grant_type=client_credentials&amp;client_id=…&amp;client_secret=…&amp;scope=https://graph.microsoft.com/.default</code></pre>
+<h3>Authorization code with PKCE</h3>
+<p>The client sends the browser to <code>/{tenant}/oauth2/v2.0/authorize</code> with a
+<code>code_challenge</code> (the SHA-256 of a random verifier). The user signs in and consents, and the
+browser returns to the <code>redirect_uri</code> with a code. The client exchanges the code and the
+<code>code_verifier</code> for an access token, an ID token and, with <code>offline_access</code>, a refresh
+token. A stolen code is useless without the verifier.</p>
+<h3>Refresh token</h3>
+<p>The client exchanges a refresh token for a new access token. Entra rotates refresh tokens: the response
+has a new one and the client stores it.</p>
+<p>The simulator also implements the on-behalf-of, device code and password grants, described in
+<a href="identity.html#grants">Identity endpoints</a>.</p>
+</main>
+</div>
+</body>
+</html>

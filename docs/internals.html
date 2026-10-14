@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Internals · entra-sim</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<nav class="site" aria-label="Documentation">
+<a class="brand" href="index.html">entra-sim</a>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="concepts.html">Entra concepts</a></li>
+<li><a href="running.html">Running</a></li>
+<li><a href="configuration.html">Configuration</a></li>
+<li><a href="identity.html">Identity endpoints</a></li>
+<li><a href="tokens.html">Tokens</a></li>
+<li><a href="graph.html">Microsoft Graph</a></li>
+<li><a href="clients.html">Connecting clients</a></li>
+<li><a href="testing.html">Testing and the studio</a></li>
+<li><a href="internals.html" aria-current="page">Internals</a></li>
+<li><a href="limits.html">Limits</a></li>
+</ul>
+</nav>
+<main>
+<h1>Internals</h1>
+<p class="lead">The source layout, the data generated from Microsoft's documentation, the design decisions behind them, and how the simulator is verified.</p>
+
+<h2 id="layout">Source layout</h2>
+<pre><code>src/
+  main.rs         Parse the configuration, set up logging, start both listeners
+  lib.rs          Assemble the router
+  config.rs       Every setting, from flags or environment variables
+  state.rs        State shared by every handler; one per tenant
+  tls.rs          Generate the CA and server certificate, or load supplied ones
+  cors.rs         Cross-origin headers
+  metadata.rs     GET /metadata/endpoints, for the Terraform provider
+  control.rs      The /__sim__ endpoints
+
+  log/            The request and event log, as JSON Lines
+    requests.rs   Record each request with its headers and bodies
+    events.rs     Record each tracing event with the request it happened during
+
+  store/          The in-memory directory
+    model.rs      User, Group, Application, ServicePrincipal and the other entities
+    mod.rs        The Directory and its lookups: memberships, roles, consent, assignment
+    bootstrap.rs  The Graph service principal and the bootstrap client
+    snapshot.rs   Dump and load the whole directory
+
+  odata/          $filter lexer, parser and evaluator; $select, $orderby, paging
+
+  auth/           The identity platform
+    oidc.rs           Discovery documents and JWKS
+    keys.rs           The RSA signing key
+    authorize.rs      The authorize endpoint, the sign-in page, consent, sessions
+    device.rs         The device code endpoints and page
+    endpoints.rs      The token endpoint and every grant
+    client_auth.rs    Secrets, certificate assertions, federated credentials
+    scopes.rs         Which API a scope names
+    token.rs          Graph, API and ID token claims and signing
+    claims.rs         Group claims, wids and optional claims
+    conditional_access.rs  Policy evaluation
+    pkce.rs           Code verifier checks
+    sessions.rs       Codes, refresh tokens, device codes, browser sessions, issued-token log
+    middleware.rs     Bearer validation and the permission check for Graph
+    permissions.rs    The permission table and its matching rules
+    oauth_error.rs    Entra's error body and AADSTS codes
+
+  graph/          Microsoft Graph, under /v1.0 and /beta
+    users.rs  groups.rs  applications.rs  service_principals.rs
+    app_role_assignments.rs  directory_roles.rs  role_schedules.rs
+    administrative_units.rs  conditional_access.rs  tenant.rs
+    batch.rs  delta.rs  userinfo.rs  error.rs  permissions_catalogue.rs
+
+studio/           The browser studio (React and Vite), served at /
+tests/            Integration tests, one file per area; tests/terraform is the provider fixture
+contract/envcheck The provider's own SDK code run against the simulator
+scripts/          Generators for the data files below
+examples/         See Connecting clients</code></pre>
+
+<h2 id="generated">Generated data</h2>
+<p>Three files are generated from Microsoft's published documentation by <code>scripts/generate-*.py</code>, not written by hand,
+because configurations name the real identifiers and an invented one would break them.</p>
+<div class="table-wrap"><table>
+<tr><th>File</th><th>Content</th><th>Source</th></tr>
+<tr><td><code>src/graph/graph_permissions.json</code></td><td>707 Graph app roles and 797 delegated scopes, with their IDs</td><td><code>microsoft-graph-docs-contrib</code>: <code>concepts/permissions-reference.md</code></td></tr>
+<tr><td><code>src/graph/directory_roles.json</code></td><td>136 directory role templates, with their IDs</td><td><code>entra-docs</code>: <code>docs/identity/role-based-access-control/permissions-reference.md</code></td></tr>
+<tr><td><code>src/auth/permission_requirements.json</code></td><td>The permissions required by 146 routes</td><td><code>microsoft-graph-docs-contrib</code>: <code>api-reference/v1.0</code></td></tr>
+</table></div>
+<pre><code>git clone --depth 1 https://github.com/microsoftgraph/microsoft-graph-docs-contrib
+git clone --depth 1 https://github.com/MicrosoftDocs/entra-docs
+
+scripts/generate-graph-permissions.py \
+  microsoft-graph-docs-contrib/concepts/permissions-reference.md src/graph/graph_permissions.json
+scripts/generate-directory-roles.py \
+  entra-docs/docs/identity/role-based-access-control/permissions-reference.md src/graph/directory_roles.json
+scripts/generate-permission-requirements.py \
+  microsoft-graph-docs-contrib/api-reference/v1.0 src/auth/permission_requirements.json</code></pre>
+<p>The route list the requirement generator covers is in the script; a route added to the simulator is added there too. CI
+regenerates all three on every push and reports a difference as a warning.</p>
+
+<h2 id="decisions">Design decisions</h2>
+<ul>
+<li><strong>TLS in the simulator.</strong> The provider forces <code>https</code> when it fetches the metadata document, so a plain HTTP simulator cannot serve Terraform.</li>
+<li><strong>Unknown properties are kept.</strong> Each entity keeps properties it does not model in an <code>extra</code> map and returns them, including explicit <code>null</code>s, so <code>terraform plan</code> after <code>apply</code> is empty.</li>
+<li><strong>Claims are read from the directory at issuance.</strong> Roles, scopes, groups and directory roles are never cached in a session, so deleting an assignment or grant changes the next token, as revocation should.</li>
+<li><strong>The check runs in the extractor.</strong> Permission enforcement runs inside the <code>Caller</code> extractor every Graph handler takes, so no route can skip it.</li>
+<li><strong>Unmapped routes are allowed.</strong> A route missing from the generated table is a gap in the simulator; refusing would break a client the real service serves. The warning in the log surfaces it.</li>
+<li><strong>Stable order.</strong> Collections are <code>BTreeMap</code>s keyed by object ID, which keeps <code>$skiptoken</code> paging stable.</li>
+<li><strong>A bad seed stops startup.</strong> An empty tenant would look like a working simulator with lost data.</li>
+<li><strong>Stable bootstrap IDs.</strong> The bootstrap objects' IDs derive from the client ID, so Terraform state written against them survives a restart.</li>
+</ul>
+
+<h2 id="verification">Verification</h2>
+<div class="table-wrap"><table>
+<tr><th>CI job</th><th>What it checks</th></tr>
+<tr><td>Format, lint and test</td><td><code>cargo fmt --check</code>, <code>cargo clippy --all-targets -- -D warnings</code>, <code>cargo test</code></td></tr>
+<tr><td>Generated files are up to date</td><td>Regenerates the three data files from Microsoft's documentation and warns on drift</td></tr>
+<tr><td>Container image</td><td>Builds the image and checks that it serves requests</td></tr>
+<tr><td>Provider contract</td><td>Runs <code>contract/envcheck</code>, the provider's <code>go-azure-sdk</code> discovery and token code at the version the provider pins, against the simulator</td></tr>
+<tr><td>Terraform acceptance</td><td>Applies <code>tests/terraform/</code>, requires <code>terraform plan -detailed-exitcode</code> to exit 0, then destroys</td></tr>
+<tr><td>Browser client</td><td>Runs the React example's Playwright suite in Chromium</td></tr>
+</table></div>
+<p>The release workflow runs on a version tag: it repeats format, lint and test, checks that the tag matches the crate version,
+publishes the image to <code>ghcr.io/gosogco/entra-sim</code>, checks the published image, and creates the GitHub release.</p>
+
+<h2 id="building">Building</h2>
+<pre><code>cargo test
+cargo clippy --all-targets -- -D warnings
+docker build -t entra-sim .</code></pre>
+</main>
+</div>
+</body>
+</html>

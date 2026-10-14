@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Microsoft Graph · entra-sim</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<nav class="site" aria-label="Documentation">
+<a class="brand" href="index.html">entra-sim</a>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="concepts.html">Entra concepts</a></li>
+<li><a href="running.html">Running</a></li>
+<li><a href="configuration.html">Configuration</a></li>
+<li><a href="identity.html">Identity endpoints</a></li>
+<li><a href="tokens.html">Tokens</a></li>
+<li><a href="graph.html" aria-current="page">Microsoft Graph</a></li>
+<li><a href="clients.html">Connecting clients</a></li>
+<li><a href="testing.html">Testing and the studio</a></li>
+<li><a href="internals.html">Internals</a></li>
+<li><a href="limits.html">Limits</a></li>
+</ul>
+</nav>
+<main>
+<h1>Microsoft Graph</h1>
+<p class="lead">The directory part of Graph, served under both <code>/v1.0</code> and <code>/beta</code> with the same handlers.</p>
+
+<div class="toc"><ul>
+<li><a href="#behaviour">General behaviour</a></li>
+<li><a href="#endpoints">Endpoint reference</a></li>
+<li><a href="#odata">OData query options</a></li>
+<li><a href="#batch">JSON batching</a></li>
+<li><a href="#delta">Delta queries</a></li>
+<li><a href="#permissions">Permission enforcement</a></li>
+<li><a href="#pim">Privileged Identity Management</a></li>
+<li><a href="#admin-units">Administrative units</a></li>
+<li><a href="#errors">Errors</a></li>
+</ul></div>
+
+<h2 id="behaviour">General behaviour</h2>
+<ul>
+<li>Every request needs a bearer token the simulator issued for Graph (see <a href="tokens.html#kinds">token kinds</a>). The tenant comes from its <code>tid</code>.</li>
+<li><code>/beta</code> serves the same handlers as <code>/v1.0</code>, because the Terraform <code>azuread</code> provider uses <code>/beta</code> for several resources.</li>
+<li>Collections are ordered by object ID, so <code>$skiptoken</code> paging is stable.</li>
+<li>Properties the simulator does not model are stored and returned unchanged, and an explicit <code>null</code> reads back as <code>null</code>. Terraform therefore sees no drift.</li>
+<li>Write-only values never come back: <code>owners@odata.bind</code> and <code>members@odata.bind</code> are applied, not stored; <code>secretText</code> appears only in the <code>addPassword</code> response; a user's password never appears.</li>
+<li>The identity that creates an application or a service principal becomes its initial owner when no owners are bound, as in Entra.</li>
+<li>Writes are readable immediately.</li>
+</ul>
+
+<h2 id="endpoints">Endpoint reference</h2>
+<p>Paths are relative to <code>/v1.0</code> or <code>/beta</code>.</p>
+
+<h3>Users</h3>
+<pre><code>GET    /me                                  the signed-in user; user tokens only
+GET    /users                     POST   /users
+GET    /users/{id}                PATCH  /users/{id}       PUT /users/{id}
+DELETE /users/{id}
+GET    /users/{id}/memberOf
+GET    /users/{id}/appRoleAssignments       POST /users/{id}/appRoleAssignments
+GET    /users/{id}/appRoleAssignments/{assignment-id}
+DELETE /users/{id}/appRoleAssignments/{assignment-id}
+GET    /users/delta</code></pre>
+<p><code>{id}</code> is the object ID or the user principal name. With a user token, changing or deleting another user needs a
+directory role; see <a href="#admin-units">administrative units</a>.</p>
+
+<h3>Groups</h3>
+<pre><code>GET    /groups                    POST   /groups
+GET    /groups/{id}               PATCH  /groups/{id}      PUT /groups/{id}
+DELETE /groups/{id}
+GET    /groups/{id}/members       GET /groups/{id}/members/$ref     POST /groups/{id}/members/$ref
+DELETE /groups/{id}/members/{member-id}/$ref
+GET    /groups/{id}/owners        GET /groups/{id}/owners/$ref      POST /groups/{id}/owners/$ref
+DELETE /groups/{id}/owners/{owner-id}/$ref
+GET    /groups/{id}/transitiveMembers
+GET    /groups/{id}/memberOf
+GET    /groups/{id}/appRoleAssignments
+GET    /groups/delta
+POST   /directoryObjects/getByIds</code></pre>
+
+<h3>Applications</h3>
+<pre><code>GET    /applications              POST   /applications
+GET    /applications/{id}         PATCH  /applications/{id}   PUT /applications/{id}
+DELETE /applications/{id}
+POST   /applications/{id}/addPassword       POST /applications/{id}/removePassword
+POST   /applications/{id}/addKey            POST /applications/{id}/removeKey
+GET    /applications/{id}/owners            POST /applications/{id}/owners/$ref
+DELETE /applications/{id}/owners/{owner-id}/$ref
+GET    /applications/{id}/federatedIdentityCredentials
+POST   /applications/{id}/federatedIdentityCredentials
+GET    /applications/{id}/federatedIdentityCredentials/{credential-id}
+DELETE /applications/{id}/federatedIdentityCredentials/{credential-id}
+GET    /applications/delta</code></pre>
+<p>App roles and scopes defined on an application (<code>appRoles</code>, <code>api.oauth2PermissionScopes</code>) are what
+tokens for that API are built from. <code>keyCredentials</code> hold the certificates used for
+<a href="identity.html#client-auth">certificate assertions</a>.</p>
+
+<h3>Service principals</h3>
+<pre><code>GET    /servicePrincipals         POST   /servicePrincipals
+GET    /servicePrincipals/{id}    PATCH  /servicePrincipals/{id}   PUT /servicePrincipals/{id}
+DELETE /servicePrincipals/{id}
+GET    /servicePrincipals/{id}/owners       POST /servicePrincipals/{id}/owners/$ref
+DELETE /servicePrincipals/{id}/owners/{owner-id}/$ref
+GET    /servicePrincipals/{id}/memberOf
+GET    /servicePrincipals/{id}/appRoleAssignedTo        POST /servicePrincipals/{id}/appRoleAssignedTo
+POST   /servicePrincipals/{id}/appRoleAssignedTo/$ref
+GET    /servicePrincipals/{id}/appRoleAssignedTo/{assignment-id}
+DELETE /servicePrincipals/{id}/appRoleAssignedTo/{assignment-id}
+GET    /servicePrincipals/{id}/appRoleAssignments       POST /servicePrincipals/{id}/appRoleAssignments
+GET    /servicePrincipals/{id}/appRoleAssignments/{assignment-id}
+DELETE /servicePrincipals/{id}/appRoleAssignments/{assignment-id}
+GET    /servicePrincipals/{id}/oauth2PermissionGrants
+GET    /servicePrincipals/delta</code></pre>
+<p>The Microsoft Graph service principal exists from startup, with Microsoft's full catalogue of Graph app roles and
+delegated scopes and their real IDs.</p>
+
+<h3>Delegated permission grants</h3>
+<pre><code>GET    /oauth2PermissionGrants              POST  /oauth2PermissionGrants
+GET    /oauth2PermissionGrants/{id}         PATCH /oauth2PermissionGrants/{id}
+DELETE /oauth2PermissionGrants/{id}
+GET    /oauth2PermissionGrants/delta</code></pre>
+
+<h3>Directory roles</h3>
+<pre><code>GET    /directoryRoleTemplates              GET  /directoryRoleTemplates/{id}
+GET    /directoryRoles                      POST /directoryRoles          (activate a template)
+GET    /directoryRoles/{id}                 GET  /directoryRoles/{id}/members
+POST   /directoryRoles/{id}/members/$ref
+DELETE /directoryRoles/{id}/members/{member-id}/$ref
+GET    /directoryRoles/delta
+GET    /roleManagement/directory/roleDefinitions        GET /roleManagement/directory/roleDefinitions/{id}
+GET    /roleManagement/directory/roleAssignments        POST /roleManagement/directory/roleAssignments
+GET    /roleManagement/directory/roleAssignments/{id}
+DELETE /roleManagement/directory/roleAssignments/{id}</code></pre>
+<p>All of Microsoft's built-in role templates exist, with their real IDs. A role's members include the principals with an active
+tenant-wide <a href="#pim">PIM</a> assignment.</p>
+
+<h3>Privileged Identity Management</h3>
+<pre><code>GET  POST /roleManagement/directory/roleEligibilityScheduleRequests
+GET       /roleManagement/directory/roleEligibilityScheduleRequests/{id}
+POST      /roleManagement/directory/roleEligibilityScheduleRequests/{id}/cancel
+GET       /roleManagement/directory/roleEligibilitySchedules
+GET       /roleManagement/directory/roleEligibilitySchedules/{id}
+GET  POST /roleManagement/directory/roleAssignmentScheduleRequests
+GET       /roleManagement/directory/roleAssignmentScheduleRequests/{id}
+POST      /roleManagement/directory/roleAssignmentScheduleRequests/{id}/cancel
+GET       /roleManagement/directory/roleAssignmentSchedules
+GET       /roleManagement/directory/roleAssignmentSchedules/{id}</code></pre>
+
+<h3>Administrative units</h3>
+<p>Each path exists under both <code>/directory/administrativeUnits</code> and <code>/administrativeUnits</code>.</p>
+<pre><code>GET    /directory/administrativeUnits       POST   /directory/administrativeUnits
+GET    /directory/administrativeUnits/{id}  PATCH  /directory/administrativeUnits/{id}
+DELETE /directory/administrativeUnits/{id}
+GET    /directory/administrativeUnits/{id}/members
+POST   /directory/administrativeUnits/{id}/members/$ref
+DELETE /directory/administrativeUnits/{id}/members/{member-id}/$ref
+GET    /directory/administrativeUnits/{id}/scopedRoleMembers
+POST   /directory/administrativeUnits/{id}/scopedRoleMembers
+GET    /directory/administrativeUnits/{id}/scopedRoleMembers/{membership-id}
+DELETE /directory/administrativeUnits/{id}/scopedRoleMembers/{membership-id}</code></pre>
+
+<h3>Conditional access</h3>
+<pre><code>GET    /identity/conditionalAccess/policies         POST   /identity/conditionalAccess/policies
+GET    /identity/conditionalAccess/policies/{id}    PATCH  /identity/conditionalAccess/policies/{id}
+DELETE /identity/conditionalAccess/policies/{id}</code></pre>
+<p>How policies are enforced is described under <a href="identity.html#conditional-access">conditional access</a>.</p>
+
+<h3>Tenant</h3>
+<pre><code>GET /organization          GET /organization/{id}
+GET /domains               GET /domains/{id}</code></pre>
+
+<h3>Protocol</h3>
+<pre><code>POST /$batch</code></pre>
+<p>Every <code>…/delta</code> path is also served as <code>…/delta()</code> and <code>…/microsoft.graph.delta()</code>, which the
+Graph SDKs call. <a href="identity.html#userinfo"><code>/oidc/userinfo</code></a> sits outside the version prefixes, as on Graph.</p>
+
+<h2 id="odata">OData query options</h2>
+<div class="table-wrap"><table>
+<tr><th>Option</th><th>Support</th></tr>
+<tr><td><code>$filter</code></td><td><code>eq</code>, <code>ne</code>, <code>gt</code>, <code>ge</code>, <code>lt</code>, <code>le</code>; <code>and</code>, <code>or</code>, <code>not</code>; <code>startswith</code>, <code>endswith</code>, <code>contains</code>; <code>in (…)</code>; lambdas such as <code>identifierUris/any(x: x eq 'api://orders')</code>. An invalid filter gives <code>400 Request_UnsupportedQuery</code>.</td></tr>
+<tr><td><code>$select</code></td><td>A comma-separated list of properties</td></tr>
+<tr><td><code>$orderby</code></td><td>A property, with <code>asc</code> or <code>desc</code></td></tr>
+<tr><td><code>$top</code></td><td>1 to 999. The default page size is 100.</td></tr>
+<tr><td><code>$skiptoken</code></td><td>From <code>@odata.nextLink</code></td></tr>
+<tr><td><code>$count</code></td><td><code>true</code> adds <code>@odata.count</code></td></tr>
+<tr><td><code>$expand</code></td><td><code>members</code> and <code>owners</code> on groups. <code>members($select=id)</code> is accepted; only the property name is read.</td></tr>
+<tr><td><code>$search</code></td><td>Refused with <code>400 Request_UnsupportedQuery</code></td></tr>
+</table></div>
+
+<h2 id="batch">JSON batching</h2>
+<p><code>POST /v1.0/$batch</code> and <code>POST /beta/$batch</code> take <code>requests</code>, each with an <code>id</code>, a
+<code>method</code>, a relative <code>url</code>, and optional <code>headers</code>, <code>body</code> and <code>dependsOn</code>.</p>
+<ul>
+<li>At most 20 requests; more, a duplicate <code>id</code>, or a malformed batch gives <code>400</code>.</li>
+<li>The batch itself needs a valid token. Each request runs through the same router with that token, so routing, permission checks and OData behave as in a direct call.</li>
+<li>The answer is <code>200</code> with <code>responses</code>, each with <code>id</code>, <code>status</code>, <code>headers</code> and <code>body</code>.</li>
+<li>A request whose dependency failed gets <code>424</code>.</li>
+</ul>
+
+<h2 id="delta">Delta queries</h2>
+<p><code>GET …/delta</code> on users, groups, applications, service principals, directory roles and delegated permission grants.</p>
+<ul>
+<li>The first call returns every current object and an <code>@odata.deltaLink</code> with a <code>$deltatoken</code>. Calling that link returns what changed since, and a new link.</li>
+<li><code>$deltatoken=latest</code> returns only a delta link.</li>
+<li>Deleted objects come back as their <code>id</code> with <code>@removed: {"reason": "deleted"}</code>.</li>
+<li>Group membership changes come back in <code>members@delta</code>.</li>
+<li><code>$select</code> limits what is tracked: a change to an unselected property does not return the object.</li>
+<li><code>$filter</code> supports only <code>id eq '…'</code>, at most 50 IDs. <code>$expand</code>, <code>$top</code> and <code>$orderby</code> are refused for users and groups.</li>
+<li><code>Prefer: return=minimal</code> returns only changed properties.</li>
+<li>Every round fits in one page; there is no <code>@odata.nextLink</code>.</li>
+</ul>
+
+<h2 id="permissions">Permission enforcement</h2>
+<p>Each Graph request is checked against the permissions Microsoft documents for that endpoint, generated from Microsoft's
+documentation into <code>src/auth/permission_requirements.json</code>.</p>
+<ul>
+<li>A requirement is a list of alternatives, each a set of permissions held together. For example, <code>POST /servicePrincipals/{id}/appRoleAssignedTo</code> accepts <code>AppRoleAssignment.ReadWrite.All</code> with <code>Application.Read.All</code>, or <code>AppRoleAssignment.ReadWrite.All</code> with <code>Directory.Read.All</code>, or <code>Application.ReadWrite.All</code> alone. Half of an alternative is not enough.</li>
+<li>An app-only token is judged on <code>roles</code>, a user token on <code>scp</code>. The two are never mixed.</li>
+<li>A <code>ReadWrite</code> permission satisfies a requirement for the matching <code>Read</code> permission, as in Entra.</li>
+<li>A refusal is <code>403 Authorization_RequestDenied</code>, "Insufficient privileges to complete the operation."</li>
+<li>A route the table does not cover is allowed, with a warning in the log.</li>
+<li><code>--enforce-permissions false</code> turns the check off.</li>
+</ul>
+
+<h2 id="pim">Privileged Identity Management</h2>
+<p>Directory roles can be made eligible and activated through schedule requests, so
+<code>azuread_directory_role_eligibility_schedule_request</code> works.</p>
+<ul>
+<li>A request needs <code>action</code>, <code>principalId</code> and <code>roleDefinitionId</code> (a role template ID); <code>directoryScopeId</code> defaults to <code>/</code>. An unknown principal gives <code>404 SubjectNotFound</code>, an unknown role <code>404 RoleNotFound</code>.</li>
+<li>Every request completes at once with status <code>Provisioned</code>, with no approval step. The schedule it creates has the request's ID.</li>
+<li>Actions: <code>adminAssign</code>, <code>adminUpdate</code>, <code>adminExtend</code>, <code>adminRenew</code>, <code>selfActivate</code>, <code>selfExtend</code>, <code>selfRenew</code>, <code>adminRemove</code>, <code>selfDeactivate</code>.</li>
+<li>A <code>self…</code> request must be made with the principal's own token (<code>403</code> otherwise). <code>selfActivate</code> needs a current eligibility for that role and scope (<code>400 RoleAssignmentDoesNotExist</code> otherwise).</li>
+<li><code>scheduleInfo.expiration</code> accepts <code>noExpiration</code>, <code>afterDateTime</code> and <code>afterDuration</code> (ISO 8601, such as <code>PT8H</code>). An activation without an end lasts eight hours; other schedules without an end do not expire.</li>
+<li>An active tenant-wide assignment counts in <code>wids</code>, group claims, conditional access, assignment-required checks and the role's members until it ends. One scoped to <code>/administrativeUnits/{id}</code> counts only over that unit.</li>
+<li><code>cancel</code> is always refused, because no request is ever left pending.</li>
+</ul>
+
+<h2 id="admin-units">Administrative units</h2>
+<p>Units support <code>azuread_administrative_unit</code>, <code>azuread_administrative_unit_member</code> and
+<code>azuread_administrative_unit_role_member</code>.</p>
+<ul>
+<li>Members are users and groups, added with <code>$ref</code>.</li>
+<li>A scoped role membership has <code>roleId</code>, the object ID of an activated directory role, and <code>roleMemberInfo.id</code>. Only the 14 roles Microsoft lists as assignable over a unit are accepted: Authentication Administrator, Attribute Assignment Administrator, Attribute Assignment Reader, Cloud Device Administrator, Groups Administrator, Helpdesk Administrator, License Administrator, Password Administrator, Printer Administrator, Privileged Authentication Administrator, SharePoint Administrator, Teams Administrator, Teams Devices Administrator and User Administrator.</li>
+<li>With a user token, <code>PATCH</code> or <code>DELETE</code> on another user needs the signed-in user to be a Global Administrator or User Administrator tenant-wide, or a User Administrator over a unit the target is a direct member of, through a scoped role membership or a PIM schedule. Otherwise <code>403 Authorization_RequestDenied</code>. Membership through a group in the unit does not count. Users may always update their own profile.</li>
+</ul>
+
+<h2 id="errors">Errors</h2>
+<p>Errors use Graph's envelope:</p>
+<pre><code>{
+  "error": {
+    "code": "Authorization_RequestDenied",
+    "message": "Insufficient privileges to complete the operation.",
+    "innerError": { "date": "…", "request-id": "…", "client-request-id": "…" }
+  }
+}</code></pre>
+<div class="table-wrap"><table>
+<tr><th>Status</th><th>Code</th><th>Cause</th></tr>
+<tr><td>400</td><td><code>Request_BadRequest</code></td><td>Invalid body or property</td></tr>
+<tr><td>400</td><td><code>Request_UnsupportedQuery</code></td><td>Invalid or unsupported query option</td></tr>
+<tr><td>401</td><td><code>InvalidAuthenticationToken</code></td><td>Missing, expired or wrongly addressed token</td></tr>
+<tr><td>403</td><td><code>Authorization_RequestDenied</code></td><td>Missing permission or directory role</td></tr>
+<tr><td>404</td><td><code>Request_ResourceNotFound</code></td><td>Unknown object</td></tr>
+</table></div>
+</main>
+</div>
+</body>
+</html>

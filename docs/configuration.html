@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration · entra-sim</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<nav class="site" aria-label="Documentation">
+<a class="brand" href="index.html">entra-sim</a>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="concepts.html">Entra concepts</a></li>
+<li><a href="running.html">Running</a></li>
+<li><a href="configuration.html" aria-current="page">Configuration</a></li>
+<li><a href="identity.html">Identity endpoints</a></li>
+<li><a href="tokens.html">Tokens</a></li>
+<li><a href="graph.html">Microsoft Graph</a></li>
+<li><a href="clients.html">Connecting clients</a></li>
+<li><a href="testing.html">Testing and the studio</a></li>
+<li><a href="internals.html">Internals</a></li>
+<li><a href="limits.html">Limits</a></li>
+</ul>
+</nav>
+<main>
+<h1>Configuration</h1>
+<p class="lead">Every setting is a flag and an environment variable. <code>entra-sim --help</code> prints the same list.</p>
+
+<p>List settings take comma-separated values in the environment variable, and a repeated flag or comma-separated values on the
+command line. "Image" is the value the container image sets.</p>
+
+<h2 id="network">Network and TLS</h2>
+<div class="table-wrap"><table>
+<tr><th>Flag</th><th>Environment variable</th><th>Default</th><th>Purpose</th></tr>
+<tr><td><code>--bind</code></td><td><code>ENTRA_SIM_BIND</code></td><td><code>127.0.0.1</code> (image: <code>0.0.0.0</code>)</td><td>Address both listeners bind to</td></tr>
+<tr><td><code>--http-port</code></td><td><code>ENTRA_SIM_HTTP_PORT</code></td><td><code>8080</code></td><td>Plain HTTP port</td></tr>
+<tr><td><code>--https-port</code></td><td><code>ENTRA_SIM_HTTPS_PORT</code></td><td><code>8443</code></td><td>HTTPS port</td></tr>
+<tr><td><code>--no-tls</code></td><td><code>ENTRA_SIM_NO_TLS</code></td><td>off</td><td>Disable the HTTPS listener</td></tr>
+<tr><td><code>--public-host</code></td><td><code>ENTRA_SIM_PUBLIC_HOST</code></td><td><code>localhost:8443</code></td><td>Host and port in every URL the simulator emits, including <code>iss</code> and Graph's <code>aud</code>. Clients must reach it there.</td></tr>
+<tr><td><code>--tls-san</code></td><td><code>ENTRA_SIM_TLS_SAN</code></td><td><code>localhost,127.0.0.1</code> (image: adds <code>entra-sim</code>)</td><td>Names in the generated server certificate. Ports are ignored.</td></tr>
+<tr><td><code>--ca-out</code></td><td><code>ENTRA_SIM_CA_OUT</code></td><td>none (image: <code>/certs/ca.pem</code>)</td><td>Where to write the generated CA certificate</td></tr>
+<tr><td><code>--tls-cert</code></td><td><code>ENTRA_SIM_TLS_CERT</code></td><td>none</td><td>A PEM certificate chain to use instead of generating one. Requires <code>--tls-key</code>.</td></tr>
+<tr><td><code>--tls-key</code></td><td><code>ENTRA_SIM_TLS_KEY</code></td><td>none</td><td>Its PEM private key. Requires <code>--tls-cert</code>.</td></tr>
+<tr><td><code>--cors-allow-origin</code></td><td><code>ENTRA_SIM_CORS_ALLOW_ORIGIN</code></td><td>empty: every origin</td><td>Origins allowed to make cross-origin requests</td></tr>
+</table></div>
+
+<h2 id="tenant">Tenant</h2>
+<div class="table-wrap"><table>
+<tr><th>Flag</th><th>Environment variable</th><th>Default</th><th>Purpose</th></tr>
+<tr><td><code>--tenant-id</code></td><td><code>ENTRA_SIM_TENANT_ID</code></td><td><code>00000000-0000-0000-0000-000000000001</code></td><td>The primary tenant's ID</td></tr>
+<tr><td><code>--tenant-domain</code></td><td><code>ENTRA_SIM_TENANT_DOMAIN</code></td><td><code>entra-sim.test</code></td><td>Its initial domain, reported by <code>/domains</code> and <code>/organization</code></td></tr>
+<tr><td><code>--additional-tenant</code></td><td><code>ENTRA_SIM_ADDITIONAL_TENANTS</code></td><td>none</td><td>More tenants, each <code>TENANT_ID=DOMAIN</code>. See <a href="identity.html#tenants">More than one tenant</a>.</td></tr>
+<tr><td><code>--bootstrap-client-id</code></td><td><code>ENTRA_SIM_BOOTSTRAP_CLIENT_ID</code></td><td><code>11111111-1111-1111-1111-111111111111</code></td><td>Client ID of the application registered at startup</td></tr>
+<tr><td><code>--bootstrap-client-secret</code></td><td><code>ENTRA_SIM_BOOTSTRAP_CLIENT_SECRET</code></td><td><code>entra-sim-bootstrap-secret</code></td><td>Its secret</td></tr>
+<tr><td><code>--bootstrap-app-role</code></td><td><code>ENTRA_SIM_BOOTSTRAP_APP_ROLES</code></td><td>see below</td><td>The Graph app roles assigned to it</td></tr>
+<tr><td><code>--seed</code></td><td><code>ENTRA_SIM_SEED</code></td><td>none</td><td>A snapshot to load at startup and on every reset. See <a href="testing.html#seed">Seed files</a>.</td></tr>
+</table></div>
+<p>The default bootstrap app roles: <code>AdministrativeUnit.ReadWrite.All</code>, <code>Application.ReadWrite.All</code>,
+<code>AppRoleAssignment.ReadWrite.All</code>, <code>Directory.ReadWrite.All</code>, <code>Group.ReadWrite.All</code>,
+<code>GroupMember.ReadWrite.All</code>, <code>Policy.Read.All</code>, <code>Policy.ReadWrite.ConditionalAccess</code>,
+<code>RoleManagement.ReadWrite.Directory</code>, <code>User.ReadWrite.All</code>.</p>
+
+<h2 id="tokens">Tokens and sign-in</h2>
+<div class="table-wrap"><table>
+<tr><th>Flag</th><th>Environment variable</th><th>Default</th><th>Purpose</th></tr>
+<tr><td><code>--signing-key</code></td><td><code>ENTRA_SIM_SIGNING_KEY</code></td><td>generated</td><td>A PKCS#8 PEM RSA key, so <code>kid</code> survives a restart</td></tr>
+<tr><td><code>--token-ttl-seconds</code></td><td><code>ENTRA_SIM_TOKEN_TTL</code></td><td><code>3600</code></td><td>Access and ID token lifetime</td></tr>
+<tr><td><code>--auto-sign-in-user</code></td><td><code>ENTRA_SIM_AUTO_SIGN_IN_USER</code></td><td>none</td><td>A user principal name to sign in without showing the page. <code>prompt=login</code>, <code>select_account</code> and <code>consent</code> still show it.</td></tr>
+<tr><td><code>--enforce-permissions</code></td><td><code>ENTRA_SIM_ENFORCE_PERMISSIONS</code></td><td><code>true</code></td><td>Check Graph requests against Microsoft's permission tables</td></tr>
+</table></div>
+
+<h2 id="studio-log">Studio and logging</h2>
+<div class="table-wrap"><table>
+<tr><th>Flag</th><th>Environment variable</th><th>Default</th><th>Purpose</th></tr>
+<tr><td><code>--studio-dir</code></td><td><code>ENTRA_SIM_STUDIO_DIR</code></td><td>none (image: <code>/usr/share/entra-sim/studio</code>)</td><td>Files served at <code>/</code></td></tr>
+<tr><td><code>--log-dir</code></td><td><code>ENTRA_SIM_LOG_DIR</code></td><td>none (image: <code>/logs</code>)</td><td>Directory for <code>entra-sim.jsonl</code>, the request and event log. Unset, nothing is recorded.</td></tr>
+<tr><td>none</td><td><code>ENTRA_SIM_LOG</code></td><td><code>info</code></td><td>The <code>tracing</code> filter for the log on stdout. The log file always records the simulator's debug events.</td></tr>
+</table></div>
+</main>
+</div>
+</body>
+</html>
