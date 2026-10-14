@@ -32,7 +32,7 @@
   {
     "id": "cf1c38e5-3621-4004-a7cb-879624dced7c",
     "displayName": "Application Developer",
-    "description": "Can create application registrations independent of the 'Users can register applications' setting."
+    "description": "Can create application registrations independent of the 'Users can register applications' setting and update applications they own."
   },
   {
     "id": "9c6df0f2-1e7c-4dc3-b195-66dfbd24aa8f",

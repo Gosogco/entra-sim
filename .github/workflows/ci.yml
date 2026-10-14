@@ -75,12 +75,13 @@ jobs:
             /tmp/graph-docs/api-reference/v1.0 \
             src/auth/permission_requirements.json
 
-      - name: Report any drift
+      - name: Fail on drift
         run: |
           if ! git diff --quiet; then
-            echo "::warning::A generated file differs from the published documentation."
+            echo "::error::A generated file differs from the published documentation."
             echo "Regenerate with scripts/generate-*.py and commit the result."
             git --no-pager diff --stat
+            exit 1
           fi
 
   container:
@@ -138,8 +139,31 @@ jobs:
         if: failure()
         run: docker logs entra-sim
 
+  # The release binary the contract, Terraform and browser jobs run, compiled once and passed
+  # to them as an artifact.
+  build:
+    name: Build the simulator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: entra-sim
+          path: target/release/entra-sim
+          retention-days: 1
+
   contract:
     name: Provider contract
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -153,13 +177,14 @@ jobs:
         run: go build -o envcheck .
         working-directory: contract/envcheck
 
-      - name: Install the toolchain
-        run: rustup toolchain install stable --profile minimal
+      - name: Fetch the simulator
+        uses: actions/download-artifact@v4
+        with:
+          name: entra-sim
+          path: target/release
 
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build the simulator
-        run: cargo build --release --locked
+      # An artifact does not keep the executable bit.
+      - run: chmod +x target/release/entra-sim
 
       # This runs the azuread provider's own discovery and client-credentials code against the
       # simulator, at the SDK version the provider pins. A change in the SDK that breaks the
@@ -170,7 +195,7 @@ jobs:
           ./target/release/entra-sim \
             --bind 127.0.0.1 --http-port 8080 --https-port 8443 \
             --tls-san localhost,127.0.0.1 --public-host localhost:8443 \
-            --ca-out certs/ca.pem &
+            --ca-out certs/ca.pem > simulator.log 2>&1 &
 
           for _ in $(seq 1 60); do
             if curl --fail --silent --output /dev/null http://127.0.0.1:8080/__sim__/health; then
@@ -185,8 +210,13 @@ jobs:
             11111111-1111-1111-1111-111111111111 \
             entra-sim-bootstrap-secret
 
+      - name: Show the simulator log on failure
+        if: failure()
+        run: cat simulator.log
+
   terraform:
     name: Terraform acceptance
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -195,13 +225,14 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: Install the toolchain
-        run: rustup toolchain install stable --profile minimal
+      - name: Fetch the simulator
+        uses: actions/download-artifact@v4
+        with:
+          name: entra-sim
+          path: target/release
 
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build the simulator
-        run: cargo build --release --locked
+      # An artifact does not keep the executable bit.
+      - run: chmod +x target/release/entra-sim
 
       - name: Start the simulator
         run: |
@@ -247,6 +278,7 @@ jobs:
 
   browser:
     name: Browser client
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -263,13 +295,14 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: Install the toolchain
-        run: rustup toolchain install stable --profile minimal
+      - name: Fetch the simulator
+        uses: actions/download-artifact@v4
+        with:
+          name: entra-sim
+          path: target/release
 
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build the simulator
-        run: cargo build --release --locked
+      # An artifact does not keep the executable bit.
+      - run: chmod +x target/release/entra-sim
 
       - name: Start the simulator
         run: |
