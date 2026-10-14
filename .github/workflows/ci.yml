@@ -75,12 +75,13 @@ jobs:
             /tmp/graph-docs/api-reference/v1.0 \
             src/auth/permission_requirements.json
 
-      - name: Report any drift
+      - name: Fail on drift
         run: |
           if ! git diff --quiet; then
-            echo "::warning::A generated file differs from the published documentation."
+            echo "::error::A generated file differs from the published documentation."
             echo "Regenerate with scripts/generate-*.py and commit the result."
             git --no-pager diff --stat
+            exit 1
           fi
 
   container:

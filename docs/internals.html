@@ -99,7 +99,7 @@ scripts/generate-directory-roles.py \
 scripts/generate-permission-requirements.py \
   microsoft-graph-docs-contrib/api-reference/v1.0 src/auth/permission_requirements.json</code></pre>
 <p>The route list the requirement generator covers is in the script; a route added to the simulator is added there too. CI
-regenerates all three on every push and reports a difference as a warning.</p>
+regenerates all three on every push and pull request and fails when one differs.</p>
 
 <h2 id="decisions">Design decisions</h2>
 <ul>
@@ -117,7 +117,7 @@ regenerates all three on every push and reports a difference as a warning.</p>
 <div class="table-wrap"><table>
 <tr><th>CI job</th><th>What it checks</th></tr>
 <tr><td>Format, lint and test</td><td><code>cargo fmt --check</code>, <code>cargo clippy --all-targets -- -D warnings</code>, <code>cargo test</code></td></tr>
-<tr><td>Generated files are up to date</td><td>Regenerates the three data files from Microsoft's documentation and warns on drift</td></tr>
+<tr><td>Generated files are up to date</td><td>Regenerates the three data files from Microsoft's documentation and fails if one differs</td></tr>
 <tr><td>Container image</td><td>Builds the image and checks that it serves requests</td></tr>
 <tr><td>Provider contract</td><td>Runs <code>contract/envcheck</code>, the provider's <code>go-azure-sdk</code> discovery and token code at the version the provider pins, against the simulator</td></tr>
 <tr><td>Terraform acceptance</td><td>Applies <code>tests/terraform/</code>, requires <code>terraform plan -detailed-exitcode</code> to exit 0, then destroys</td></tr>
