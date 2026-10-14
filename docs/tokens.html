@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tokens · entra-sim</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<nav class="site" aria-label="Documentation">
+<a class="brand" href="index.html">entra-sim</a>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="concepts.html">Entra concepts</a></li>
+<li><a href="running.html">Running</a></li>
+<li><a href="configuration.html">Configuration</a></li>
+<li><a href="identity.html">Identity endpoints</a></li>
+<li><a href="tokens.html" aria-current="page">Tokens</a></li>
+<li><a href="graph.html">Microsoft Graph</a></li>
+<li><a href="clients.html">Connecting clients</a></li>
+<li><a href="testing.html">Testing and the studio</a></li>
+<li><a href="internals.html">Internals</a></li>
+<li><a href="limits.html">Limits</a></li>
+</ul>
+</nav>
+<main>
+<h1>Tokens</h1>
+<p class="lead">Every token is an RS256-signed JWT with a <code>kid</code> from the JWKS. Its claims come from the directory at the moment it is issued.</p>
+
+<div class="toc"><ul>
+<li><a href="#kinds">Three kinds of access token</a></li>
+<li><a href="#graph">Graph access tokens</a></li>
+<li><a href="#api">Access tokens for your own APIs</a></li>
+<li><a href="#id">ID tokens</a></li>
+<li><a href="#roles-scp"><code>roles</code> and <code>scp</code></a></li>
+<li><a href="#groups">Group claims and <code>wids</code></a></li>
+<li><a href="#optional">Optional claims</a></li>
+<li><a href="#amr"><code>amr</code></a></li>
+<li><a href="#lifetimes">Lifetimes and keys</a></li>
+</ul></div>
+
+<h2 id="kinds">Three kinds of access token</h2>
+<p>Which kind is issued depends on the API the <a href="identity.html#scopes">scope names</a>:</p>
+<div class="table-wrap"><table>
+<tr><th>API</th><th>Format</th><th><code>iss</code></th><th><code>aud</code></th></tr>
+<tr><td>Microsoft Graph</td><td>A fixed v2.0 claim set</td><td><code>https://{public-host}/{tenant}/v2.0</code></td><td>The simulator's base URL, <code>https://{public-host}</code></td></tr>
+<tr><td>A registered API with <code>api.requestedAccessTokenVersion</code> unset or <code>1</code></td><td>v1.0</td><td><code>https://sts.windows.net/{tenant}/</code></td><td>The identifier URI or appId the client asked with; the appId when the <code>aud</code> optional claim has <code>use_guid</code></td></tr>
+<tr><td>A registered API with <code>api.requestedAccessTokenVersion</code> <code>2</code></td><td>v2.0</td><td><code>https://{public-host}/{tenant}/v2.0</code></td><td>The API's appId</td></tr>
+</table></div>
+<p>The Graph <code>aud</code> is the simulator's URL, not <code>https://graph.microsoft.com</code>, because the simulator's
+Graph endpoints check that <code>aud</code>. A token for any other API is refused by Graph with <code>401</code>.</p>
+<p>An API validating v1.0 tokens reads the v1.0 discovery document at
+<code>/{tenant}/.well-known/openid-configuration</code>, whose <code>issuer</code> is the v1.0 issuer. v1.0 access tokens
+also carry an <code>x5t</code> header equal to <code>kid</code>.</p>
+
+<h2 id="graph">Graph access tokens</h2>
+<div class="table-wrap"><table>
+<tr><th>Claim</th><th>App-only</th><th>User</th></tr>
+<tr><td><code>aud</code>, <code>iss</code>, <code>iat</code>, <code>nbf</code>, <code>exp</code>, <code>tid</code></td><td>yes</td><td>yes</td></tr>
+<tr><td><code>ver</code></td><td><code>2.0</code></td><td><code>2.0</code></td></tr>
+<tr><td><code>appid</code>, <code>appidacr</code></td><td>The client</td><td>The client</td></tr>
+<tr><td><code>idtyp</code></td><td><code>app</code></td><td><code>user</code></td></tr>
+<tr><td><code>oid</code>, <code>sub</code></td><td>The client's service principal</td><td>The user</td></tr>
+<tr><td><code>roles</code></td><td>The client's Graph app roles</td><td>The user's app roles on Graph, when any</td></tr>
+<tr><td><code>scp</code></td><td>absent</td><td>Consented Graph scopes, without <code>offline_access</code></td></tr>
+<tr><td><code>app_displayname</code></td><td>The client's display name</td><td>absent</td></tr>
+<tr><td><code>upn</code>, <code>name</code>, <code>preferred_username</code></td><td>absent</td><td>The user</td></tr>
+</table></div>
+<p>Graph tokens carry no group claims, <code>wids</code>, optional claims or <code>amr</code>.</p>
+
+<h2 id="api">Access tokens for your own APIs</h2>
+<div class="table-wrap"><table>
+<tr><th>Claim</th><th>v1.0</th><th>v2.0</th></tr>
+<tr><td><code>aud</code>, <code>iss</code>, <code>iat</code>, <code>nbf</code>, <code>exp</code>, <code>tid</code></td><td>yes</td><td>yes</td></tr>
+<tr><td><code>ver</code></td><td><code>1.0</code></td><td><code>2.0</code></td></tr>
+<tr><td>The client</td><td><code>appid</code>, <code>appidacr</code></td><td><code>azp</code>, <code>azpacr</code></td></tr>
+<tr><td><code>oid</code>, <code>sub</code></td><td colspan="2">The user, or the client's service principal for an app-only token</td></tr>
+<tr><td><code>idtyp</code></td><td colspan="2"><code>app</code> on app-only tokens only</td></tr>
+<tr><td><code>name</code></td><td colspan="2">The user's display name</td></tr>
+<tr><td><code>upn</code>, <code>unique_name</code></td><td>The user principal name</td><td>absent; <code>upn</code> as an optional claim</td></tr>
+<tr><td><code>given_name</code>, <code>family_name</code></td><td>When the user has them</td><td>As optional claims</td></tr>
+<tr><td><code>preferred_username</code></td><td>As an optional claim</td><td>The user principal name</td></tr>
+<tr><td><code>amr</code></td><td>Always on user tokens</td><td>As an optional claim</td></tr>
+<tr><td><code>scp</code></td><td colspan="2">User tokens: the consented scopes of this API, plus scopes pre-authorized for the client. Absent when empty.</td></tr>
+<tr><td><code>roles</code></td><td colspan="2">See below. Absent when empty.</td></tr>
+</table></div>
+<p>The <code>appidacr</code> / <code>azpacr</code> value is <code>0</code> for a public client, <code>1</code> for a secret and
+<code>2</code> for a certificate or federated credential.</p>
+
+<h2 id="id">ID tokens</h2>
+<p>ID tokens are always v2.0. <code>aud</code> is the client ID, and they carry <code>iss</code>, <code>iat</code>,
+<code>nbf</code>, <code>exp</code>, <code>oid</code>, <code>sub</code>, <code>tid</code>, <code>ver</code>, <code>name</code>,
+<code>preferred_username</code> and <code>nonce</code> when the authorize request had one. They also carry the user's
+<code>roles</code> on the client application, and the group and optional claims the client's registration asks for.</p>
+
+<h2 id="roles-scp"><code>roles</code> and <code>scp</code></h2>
+<ul>
+<li><strong>App-only token:</strong> <code>roles</code> holds the values of the app roles assigned to the client's service principal on the API.</li>
+<li><strong>User token:</strong> <code>roles</code> holds the app roles assigned to the user on the API, directly or through a security group the user is a direct member of. <code>scp</code> holds the scopes the user consented to for this client on this API.</li>
+<li>A role or scope value is read from the API's definitions at issuance. Deleting an assignment, a grant or a role changes the next token.</li>
+<li>Graph judges an app-only token on <code>roles</code> and a user token on <code>scp</code> only, so a role in a user token grants no Graph permission.</li>
+</ul>
+
+<h2 id="groups">Group claims and <code>wids</code></h2>
+<p>The <code>groupMembershipClaims</code> of the registration the token is for (the API for an access token, the client for
+an ID token) decides the group claims:</p>
+<div class="table-wrap"><table>
+<tr><th>Setting</th><th><code>groups</code></th><th><code>wids</code></th></tr>
+<tr><td><code>null</code> or <code>None</code></td><td>absent</td><td>absent</td></tr>
+<tr><td><code>SecurityGroup</code></td><td>Security groups (transitive) and directory roles, as object IDs</td><td>absent</td></tr>
+<tr><td><code>All</code></td><td>Every group (transitive) and directory roles</td><td>The user's directory role template IDs</td></tr>
+<tr><td><code>DirectoryRole</code></td><td>absent</td><td>The user's directory role template IDs</td></tr>
+<tr><td><code>ApplicationGroup</code></td><td>Groups assigned to the application that the user is a direct member of</td><td>absent</td></tr>
+</table></div>
+<p>The comparison ignores case. Directory roles include tenant-wide PIM assignments that are currently active.</p>
+<p>The <code>groups</code> optional claim refines the format through <code>additionalProperties</code>:
+<code>sam_account_name</code>, <code>dns_domain_and_sam_account_name</code> and <code>netbios_domain_and_sam_account_name</code>
+use the group's on-premises attributes and leave out groups that lack them. <code>cloud_displayname</code> emits the display
+name, with <code>ApplicationGroup</code> only. <code>emit_as_roles</code> puts the group values in <code>roles</code> instead,
+replacing the app roles.</p>
+<p>Above 200 groups, <code>groups</code> is replaced by the overage claims <code>_claim_names</code> and
+<code>_claim_sources</code>, pointing at <code>https://graph.windows.net/{tenant}/users/{user}/getMemberObjects</code>, as Entra
+does.</p>
+
+<h2 id="optional">Optional claims</h2>
+<p>The <code>optionalClaims.accessToken</code> of the API, or <code>optionalClaims.idToken</code> of the client, adds:</p>
+<div class="table-wrap"><table>
+<tr><th>Claim</th><th>Rule</th></tr>
+<tr><td><code>email</code></td><td>The user's <code>mail</code>, when requested, or for a guest user, or in an ID token when the sign-in asked for the <code>email</code> scope</td></tr>
+<tr><td><code>given_name</code>, <code>family_name</code>, <code>upn</code></td><td>v2.0 tokens, when the sign-in asked for the <code>profile</code> scope</td></tr>
+<tr><td><code>preferred_username</code></td><td>v1.0 tokens</td></tr>
+<tr><td><code>acct</code></td><td><code>0</code> for a member, <code>1</code> for a guest</td></tr>
+<tr><td><code>amr</code></td><td>v2.0 tokens</td></tr>
+<tr><td><code>xms_pl</code></td><td>The user's <code>preferredLanguage</code></td></tr>
+<tr><td><code>idtyp</code></td><td>Access tokens, with <code>include_user_token</code>: <code>user</code></td></tr>
+<tr><td><code>aud</code></td><td>v1.0 access tokens, with <code>use_guid</code>: <code>aud</code> becomes the appId</td></tr>
+</table></div>
+<p>A claim without a value is left out. Other optional claims are accepted on the registration and ignored.</p>
+
+<h2 id="amr"><code>amr</code></h2>
+<p><code>amr</code> is <code>["pwd"]</code>, or <code>["pwd", "mfa"]</code> after the MFA step that a
+<a href="identity.html#conditional-access">conditional access policy</a> requires. It appears in v1.0 user access tokens,
+and in v2.0 access tokens and ID tokens whose registration requests the <code>amr</code> optional claim. Graph tokens never
+carry it.</p>
+
+<h2 id="lifetimes">Lifetimes and keys</h2>
+<div class="table-wrap"><table>
+<tr><th>Item</th><th>Lifetime</th></tr>
+<tr><td>Access and ID tokens</td><td><code>--token-ttl-seconds</code> (<code>ENTRA_SIM_TOKEN_TTL</code>) seconds, 3600 by default</td></tr>
+<tr><td>Authorization codes</td><td>10 minutes, one use</td></tr>
+<tr><td>Refresh tokens</td><td>90 days, one use (rotated)</td></tr>
+<tr><td>Device codes</td><td>15 minutes</td></tr>
+<tr><td>Browser sessions</td><td>24 hours</td></tr>
+</table></div>
+<p>The signing key is generated at startup, so <code>kid</code> changes on every restart unless <code>--signing-key</code> gives
+a PKCS#8 PEM key. Codes, refresh tokens and sessions are held in memory and lost on restart or reset.</p>
+</main>
+</div>
+</body>
+</html>

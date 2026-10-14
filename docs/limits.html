@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Limits · entra-sim</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<nav class="site" aria-label="Documentation">
+<a class="brand" href="index.html">entra-sim</a>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="concepts.html">Entra concepts</a></li>
+<li><a href="running.html">Running</a></li>
+<li><a href="configuration.html">Configuration</a></li>
+<li><a href="identity.html">Identity endpoints</a></li>
+<li><a href="tokens.html">Tokens</a></li>
+<li><a href="graph.html">Microsoft Graph</a></li>
+<li><a href="clients.html">Connecting clients</a></li>
+<li><a href="testing.html">Testing and the studio</a></li>
+<li><a href="internals.html">Internals</a></li>
+<li><a href="limits.html" aria-current="page">Limits</a></li>
+</ul>
+</nav>
+<main>
+<h1>Limits</h1>
+<p class="lead">What the simulator does not implement, and where it knowingly behaves differently from Entra.</p>
+
+<h2 id="scope">Out of scope</h2>
+<ul>
+<li>Entitlement management, synchronization jobs, devices, licences, mail, calendars, files, photos and every other Graph area not listed in the <a href="graph.html#endpoints">endpoint reference</a>.</li>
+<li>Eventual consistency: a write is readable at once.</li>
+<li>Deleted items: a delete is permanent and cannot be restored.</li>
+<li>Personal Microsoft accounts. <code>consumers</code> is accepted as a tenant alias only.</li>
+</ul>
+
+<h2 id="identity">Identity platform</h2>
+<div class="table-wrap"><table>
+<tr><th>Area</th><th>Difference from Entra</th></tr>
+<tr><td>Flows</td><td>Only <code>response_type=code</code>. The implicit and hybrid flows, SAML, WS-Federation and the v1.0 protocol endpoints (<code>/oauth2/authorize</code>, <code>/oauth2/token</code>) are not implemented. The v1.0 discovery document holds only the issuer and the keys.</td></tr>
+<tr><td>Confidential clients</td><td>The authorization code, refresh and device code grants check a client credential only when one is presented, and PKCE only when the authorize request used it. Entra requires a confidential client to authenticate.</td></tr>
+<tr><td>Graph token audience</td><td><code>aud</code> is the simulator's URL, not <code>https://graph.microsoft.com</code>.</td></tr>
+<tr><td>Graph token claims</td><td>Graph tokens carry no <code>amr</code>, group claims, <code>wids</code> or optional claims.</td></tr>
+<tr><td>On-behalf-of and MFA</td><td>MFA carries over only when the incoming token's <code>amr</code> says so. A v2.0 token has <code>amr</code> only when its API requests the optional claim.</td></tr>
+<tr><td><code>email</code> claim</td><td>The rule follows Microsoft's documentation and has not been compared with a real tenant.</td></tr>
+<tr><td>Pre-authorized applications</td><td><code>api.preAuthorizedApplications</code> is read only from an API registered in the same tenant.</td></tr>
+<tr><td><code>AADSTS501051</code></td><td>Returned for an unassigned client, as Entra does, but the code is not in Microsoft's error reference.</td></tr>
+<tr><td>Multitenant</td><td>A single-tenant application used through <code>common</code> or <code>organizations</code> is refused with <code>AADSTS50194</code>. The control endpoints act on the primary tenant, and a seed describes it only.</td></tr>
+<tr><td>UserInfo</td><td><code>picture</code> points at <code>/v1.0/me/photo/$value</code>, which the simulator does not serve.</td></tr>
+</table></div>
+
+<h2 id="policy">Conditional access</h2>
+<ul>
+<li>Locations, platforms, devices, sign-in, user and service principal risk, insider risk and authentication flows are unknown to the simulator. A policy restricted by one of them never applies.</li>
+<li>Policies for workload identities are not enforced.</li>
+<li>An <code>authenticationStrength</code> is treated as MFA.</li>
+<li>Device, terms-of-use and custom controls cannot be satisfied and always refuse.</li>
+<li><code>sessionControls</code> are stored and not enforced.</li>
+</ul>
+
+<h2 id="graph">Microsoft Graph</h2>
+<div class="table-wrap"><table>
+<tr><th>Area</th><th>Difference from Entra</th></tr>
+<tr><td>Query options</td><td><code>$search</code> is refused. <code>$expand</code> covers <code>members</code> and <code>owners</code> on groups only.</td></tr>
+<tr><td>Delta queries</td><td>No paging: every round is one page. The last 1000 delta tokens are remembered.</td></tr>
+<tr><td>Directory role checks on user tokens</td><td>Only <code>PATCH</code> and <code>DELETE</code> on another user check the signed-in user's directory roles, and only Global Administrator and User Administrator count. Every other delegated call is judged on <code>scp</code> alone.</td></tr>
+<tr><td>Role assignments</td><td><code>POST /roleManagement/directory/roleAssignments</code> ignores <code>directoryScopeId</code>, so an assignment meant for an administrative unit becomes tenant-wide. Use a scoped role membership or a PIM request for a unit.</td></tr>
+<tr><td>PIM</td><td>Requests never wait for approval, <code>cancel</code> is always refused, and PIM for groups and Azure resources is not present.</td></tr>
+<tr><td>Administrative units</td><td>Dynamic membership rules are not evaluated, and restricted management units do not shut out tenant administrators.</td></tr>
+<tr><td>Permission table gaps</td><td><code>GET /servicePrincipals/{id}/appRoleAssignedTo/{assignment-id}</code>, <code>GET /servicePrincipals/{id}/appRoleAssignments/{assignment-id}</code> and <code>GET /users/{id}/appRoleAssignments/{assignment-id}</code> have no generated requirement, so they are allowed with a warning in the log.</td></tr>
+</table></div>
+
+<h2 id="security">Security</h2>
+<p>The simulator is a test tool. Its control endpoints are unauthenticated, the snapshot and the request log contain every secret
+and token, and the bootstrap secret is public. Keep it on <code>127.0.0.1</code> or a private network, and never load real
+credentials into it.</p>
+</main>
+</div>
+</body>
+</html>

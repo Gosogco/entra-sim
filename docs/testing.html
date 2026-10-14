@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Testing and the studio · entra-sim</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<nav class="site" aria-label="Documentation">
+<a class="brand" href="index.html">entra-sim</a>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="concepts.html">Entra concepts</a></li>
+<li><a href="running.html">Running</a></li>
+<li><a href="configuration.html">Configuration</a></li>
+<li><a href="identity.html">Identity endpoints</a></li>
+<li><a href="tokens.html">Tokens</a></li>
+<li><a href="graph.html">Microsoft Graph</a></li>
+<li><a href="clients.html">Connecting clients</a></li>
+<li><a href="testing.html" aria-current="page">Testing and the studio</a></li>
+<li><a href="internals.html">Internals</a></li>
+<li><a href="limits.html">Limits</a></li>
+</ul>
+</nav>
+<main>
+<h1>Testing and the studio</h1>
+<p class="lead">State is held in memory. The endpoints under <code>/__sim__</code> inspect and manage it, and the studio shows it in a browser.</p>
+
+<h2 id="control">Control endpoints</h2>
+<p>The <code>/__sim__</code> prefix cannot collide with a Graph or identity path. The endpoints need no token: anyone who can
+reach the simulator can already mint a token for any identity in it.</p>
+<div class="table-wrap"><table>
+<tr><th>Request</th><th>Result</th></tr>
+<tr><td><code>GET /__sim__/health</code></td><td><code>status</code>, <code>version</code> and the primary <code>tenant_id</code></td></tr>
+<tr><td><code>POST /__sim__/reset</code></td><td>Rebuilds every tenant's directory from the bootstrap objects and the seed, and drops all codes, refresh tokens, sessions, device codes and the token list. Returns the object counts.</td></tr>
+<tr><td><code>GET /__sim__/snapshot</code></td><td>The primary tenant's whole directory, secrets included</td></tr>
+<tr><td><code>POST /__sim__/snapshot</code></td><td>Replaces the primary tenant's directory with the body. The bootstrap objects are reinstalled over it, so the bootstrap client always works.</td></tr>
+<tr><td><code>GET /__sim__/tokens</code></td><td>The last 1000 tokens issued, newest first, with client, subject, audience, scopes, roles and expiry; and the refresh tokens and codes still redeemable. No token values; refresh tokens and codes show their first six characters.</td></tr>
+<tr><td><code>GET /__sim__/logs</code></td><td>The request and event log, newest first, 200 entries at a time</td></tr>
+</table></div>
+<p>Reset between test cases:</p>
+<pre><code>curl -X POST http://127.0.0.1:8080/__sim__/reset</code></pre>
+
+<h2 id="seed">Seed files</h2>
+<p>A seed is a snapshot loaded at startup and on every reset, so a suite resets between cases and lands back on its fixtures.</p>
+<pre><code># Build the state you want through Graph, then save it.
+curl -s http://127.0.0.1:8080/__sim__/snapshot &gt; seed.json
+
+docker run … -v "$PWD/seed.json:/seed/tenant.json:ro" -e ENTRA_SIM_SEED=/seed/tenant.json …</code></pre>
+<p>The file is read again on each reset, so an edit takes effect without a restart. A seed that cannot be read or parsed stops
+startup rather than leaving an empty tenant. A seed describes the primary tenant only.</p>
+
+<h2 id="log">The request log</h2>
+<p>With <code>--log-dir</code> (<code>ENTRA_SIM_LOG_DIR</code>; the image sets <code>/logs</code>), the simulator appends to
+<code>entra-sim.jsonl</code>, one JSON object per line:</p>
+<ul>
+<li>every request with its headers and both bodies, unmodified, so secrets and tokens are in the file;</li>
+<li>every event the simulator logs at debug level or above, tied to the request it happened in.</li>
+</ul>
+<p>Nothing trims the file and a reset leaves it alone. The studio's own reads of <code>/__sim__/*</code> and of its files are not
+logged.</p>
+<p><code>GET /__sim__/logs</code> pages through it: <code>limit</code> sets the count (default 200), <code>before=N</code> returns
+entries older than entry N, and <code>after=N</code> returns the oldest entries newer than N, so a poller misses nothing. Without
+a log directory it answers <code>"enabled": false</code>.</p>
+<p>With <code>run.sh</code>, the log lives on the volume <code>entra-sim-logs</code>:</p>
+<pre><code>docker run --rm -v entra-sim-logs:/logs debian:trixie-slim cat /logs/entra-sim.jsonl</code></pre>
+
+<h2 id="studio">The studio</h2>
+<p>A read-only browser view at <code>/</code> on both ports, built from <code>studio/</code> and served from
+<code>--studio-dir</code>. Its tabs:</p>
+<div class="table-wrap"><table>
+<tr><th>Tab</th><th>Shows</th></tr>
+<tr><td>Overview</td><td>The version, tenant ID and clock offset, object counts, active tokens, and credentials and tokens about to expire</td></tr>
+<tr><td>Users, Groups</td><td>Users, groups and their memberships</td></tr>
+<tr><td>App registrations, Enterprise apps</td><td>Applications and service principals</td></tr>
+<tr><td>Permissions</td><td>App role assignments and delegated permission grants</td></tr>
+<tr><td>Directory roles</td><td>Activated roles and their members</td></tr>
+<tr><td>Tokens</td><td><code>GET /__sim__/tokens</code></td></tr>
+<tr><td>Log</td><td><code>GET /__sim__/logs</code>, with each request's details</td></tr>
+</table></div>
+<p>The tab is kept in the URL hash, so a reload or a shared link opens the same view.</p>
+
+<h2 id="automation">Tests without a browser</h2>
+<ul>
+<li><code>ENTRA_SIM_AUTO_SIGN_IN_USER=alice@entra-sim.test</code> makes the authorize endpoint redirect at once with a code for that user.</li>
+<li>The password grant signs a user in with one request, for a client with <code>isFallbackPublicClient</code> or a secret.</li>
+<li>The device code flow can be completed by posting to <code>/devicelogin</code> with <code>user_code</code> and <code>user_id</code>.</li>
+<li><code>ENTRA_SIM_ENFORCE_PERMISSIONS=false</code> lets tests run before permissions are granted.</li>
+</ul>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+<div class="table-wrap"><table>
+<tr><th>Symptom</th><th>Cause</th><th>Action</th></tr>
+<tr><td><code>Permission denied (os error 13)</code> at startup</td><td>The container cannot write the CA directory or replace an old <code>ca.pem</code></td><td>Add <code>--user "$(id -u):$(id -g)"</code>, or <code>chmod 777</code> the directory and remove the old file</td></tr>
+<tr><td><code>certificate signed by unknown authority</code></td><td>The client does not trust the CA</td><td>Point <code>SSL_CERT_FILE</code> (or the runtime's equivalent) at <code>ca.pem</code></td></tr>
+<tr><td>The same, after a restart</td><td>A new CA was generated</td><td>Read <code>ca.pem</code> again, or set <code>ENTRA_SIM_TLS_CERT</code> and <code>ENTRA_SIM_TLS_KEY</code></td></tr>
+<tr><td><code>401</code> "Invalid audience" from Graph</td><td><code>ENTRA_SIM_PUBLIC_HOST</code> differs from the address the client uses, or the token is for another API</td><td>Make them the same; ask for a Graph scope</td></tr>
+<tr><td><code>400 invalid_resource</code>, <code>AADSTS500011</code></td><td>The scope names an API not in the directory</td><td>Check the identifier URI; create the application and its service principal</td></tr>
+<tr><td><code>403 Authorization_RequestDenied</code></td><td>The token lacks a permission the endpoint needs</td><td>Add the app role assignment or consent, or disable enforcement</td></tr>
+<tr><td><code>kid</code> changes after a restart</td><td>A new signing key was generated</td><td>Set <code>ENTRA_SIM_SIGNING_KEY</code></td></tr>
+<tr><td>The container takes seconds to answer</td><td>It is generating an RSA key</td><td>Wait for the health check</td></tr>
+<tr><td><code>terraform plan</code> is not empty after apply</td><td>The simulator does not return something the provider wrote</td><td>Report it; it is a simulator fault</td></tr>
+<tr><td>A Graph route works but the log warns "no published permission requirement"</td><td>The route is missing from the generated permission table and is allowed unchecked</td><td>Report it</td></tr>
+</table></div>
+</main>
+</div>
+</body>
+</html>
