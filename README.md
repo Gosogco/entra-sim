@@ -1,5 +1,11 @@
 # entra-sim
 
+[![CI](https://github.com/Gosogco/entra-sim/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Gosogco/entra-sim/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Gosogco/entra-sim)](https://github.com/Gosogco/entra-sim/releases/latest)
+[![Container](https://img.shields.io/badge/container-ghcr.io%2Fgosogco%2Fentra--sim-blue?logo=docker&logoColor=white)](https://github.com/Gosogco/entra-sim/pkgs/container/entra-sim)
+[![Rust](https://img.shields.io/badge/rust-2024_edition-orange?logo=rust)](Cargo.toml)
+[![License: MIT](https://img.shields.io/github/license/Gosogco/entra-sim)](LICENSE)
+
 A simulator of the Microsoft Entra ID identity endpoints and the Microsoft Graph API, in Rust.
 
 It lets code and infrastructure that depend on Entra run locally and in CI without a real
