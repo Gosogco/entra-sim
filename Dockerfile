@@ -6,12 +6,21 @@ WORKDIR /build
 
 # Dependencies are built against the manifests alone, so editing source does not rebuild them.
 # The dummy sources exist only to give cargo something to compile.
+# The optional build_ca secret is a CA bundle for networks that intercept TLS (run.sh passes it).
+# A secret is mounted for this step only, so it never lands in a layer. Cargo's cainfo replaces
+# the default roots rather than adding to them, so the bundle is appended to the image's own and
+# the result removed before the step ends.
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir -p src \
+RUN --mount=type=secret,id=build_ca \
+    if [ -s /run/secrets/build_ca ]; then \
+        cat /etc/ssl/certs/ca-certificates.crt /run/secrets/build_ca > /tmp/build-ca.pem \
+        && export CARGO_HTTP_CAINFO=/tmp/build-ca.pem; \
+    fi \
+    && mkdir -p src \
     && echo 'fn main() {}' > src/main.rs \
     && echo '' > src/lib.rs \
     && cargo build --release --locked \
-    && rm -rf src
+    && rm -rf src /tmp/build-ca.pem
 
 COPY src ./src
 # cargo decides what to rebuild from mtimes, and the copy above may land with an older one than
@@ -28,7 +37,9 @@ WORKDIR /studio
 
 # Installed from the manifests alone, so editing the studio's source does not reinstall them.
 COPY studio/package.json studio/package-lock.json ./
-RUN npm ci
+RUN --mount=type=secret,id=build_ca \
+    if [ -s /run/secrets/build_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/build_ca; fi \
+    && npm ci
 
 COPY studio ./
 RUN npm run build
