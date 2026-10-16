@@ -20,7 +20,16 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
-docker build --tag "$IMAGE" .
+# On a network that intercepts TLS, the build's downloads need the interceptor's CA. Set
+# ENTRA_SIM_BUILD_CA to a PEM bundle holding it, or SSL_CERT_FILE is used if set. The bundle
+# reaches the build as a secret, so it is not stored in the image.
+BUILD_CA=${ENTRA_SIM_BUILD_CA:-${SSL_CERT_FILE:-}}
+build_args=(--tag "$IMAGE")
+if [ -n "$BUILD_CA" ] && [ -f "$BUILD_CA" ]; then
+  build_args+=(--secret "id=build_ca,src=$BUILD_CA")
+fi
+
+docker build "${build_args[@]}" .
 
 docker rm --force "$CONTAINER_NAME" >/dev/null 2>&1 || true
 

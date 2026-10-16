@@ -111,6 +111,27 @@ cargo clippy --all-targets -- -D warnings
 docker build -t entra-sim .
 ```
 
+### Behind a TLS-intercepting proxy
+
+If the image build fails with `self-signed certificate in certificate chain` while cargo or npm
+downloads, your network re-signs TLS traffic with its own CA. Give the build a PEM file with
+that CA:
+
+```sh
+ENTRA_SIM_BUILD_CA=/path/to/ca-bundle.pem ./run.sh
+```
+
+`run.sh` uses `SSL_CERT_FILE` when `ENTRA_SIM_BUILD_CA` is not set. With `docker build`, pass the
+bundle yourself:
+
+```sh
+docker build --secret id=build_ca,src=/path/to/ca-bundle.pem -t entra-sim .
+```
+
+The file is mounted as a build secret only for the dependency downloads, so it is not stored in
+the image. Its certificates are added to the public roots, so either the proxy's CA alone or a
+full bundle works.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
