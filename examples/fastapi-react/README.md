@@ -31,16 +31,9 @@ http://127.0.0.1:8000, runs both daemons once, and starts the site on http://loc
 The browser has to accept the simulator's certificate once per simulator start; the script says
 how. Stop everything with Ctrl-C, and the simulator with `docker stop entra-sim-examples`.
 
-The certificate paths need an entra-sim newer than 1.0.2, which rejected the assertions MSAL
-Python builds: it required unpadded thumbprints and an `nbf` claim. Until that release is
-published, build the simulator from this checkout and start it first:
-
-```sh
-../../run.sh   # builds entra-sim:local and runs it as the container entra-sim
-./run.sh       # reuses that container
-```
-
-That simulator's domain is `entra-sim.test`, so the users are alice@entra-sim.test and so on.
+The certificate paths need entra-sim 1.1.0 or later. 1.0.2 rejected the assertions MSAL Python
+builds, because it required unpadded thumbprints and an `nbf` claim. `run.sh` pulls `latest`; if a
+simulator container from an older image is already running, stop it first.
 
 ## Who may do what
 
