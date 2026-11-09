@@ -1,0 +1,6 @@
+# The backend and the daemons. msal is pinned to the version the example was written against.
+fastapi==0.162.2
+uvicorn==0.54.0
+PyJWT[crypto]==2.15.1
+msal==1.39.0
+requests==2.34.2

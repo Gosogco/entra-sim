@@ -91,6 +91,9 @@ on `127.0.0.1`. Every setting is listed by `--help` and in
 
 - [`examples/react-spa/`](examples/react-spa/): a React app signing in with MSAL and calling
   Graph. The same build runs against the simulator and a real tenant, with a Playwright suite.
+- [`examples/fastapi-react/`](examples/fastapi-react/): a React site calling a FastAPI backend
+  that validates the token and allows or denies by app role, with certificate-authenticated
+  daemons and an on-behalf-of call through MSAL Python.
 - [`examples/terraform-users-app-roles/`](examples/terraform-users-app-roles/): users and two
   APIs with app roles, and a script that shows the roles in a user's token.
 - [`tests/terraform/`](tests/terraform/): the Terraform acceptance fixture CI applies, checks
