@@ -31,13 +31,24 @@ http://127.0.0.1:8000, runs both daemons once, and starts the site on http://loc
 The browser has to accept the simulator's certificate once per simulator start; the script says
 how. Stop everything with Ctrl-C, and the simulator with `docker stop entra-sim-examples`.
 
+The certificate paths need an entra-sim newer than 1.0.2, which rejected the assertions MSAL
+Python builds: it required unpadded thumbprints and an `nbf` claim. Until that release is
+published, build the simulator from this checkout and start it first:
+
+```sh
+../../run.sh   # builds entra-sim:local and runs it as the container entra-sim
+./run.sh       # reuses that container
+```
+
+That simulator's domain is `entra-sim.test`, so the users are alice@entra-sim.test and so on.
+
 ## Who may do what
 
 | User or application | Holds |
 |---|---|
-| alice@example.test | `Orders.Read` and `Orders.Write`, through the group `Order managers` |
-| bob@example.test | `Orders.Read`, assigned directly |
-| carol@example.test | Nothing |
+| alice | `Orders.Read` and `Orders.Write`, through the group `Order managers` |
+| bob | `Orders.Read`, assigned directly |
+| carol | Nothing |
 | `entra-sim FastAPI example reporter` | `Orders.Read`, as an application role |
 | `entra-sim FastAPI example intruder` | Nothing. The API does not require assignment, so it still gets a token, without roles, and the backend refuses it |
 
@@ -63,25 +74,19 @@ response says why, and lists the token's `roles` and `scp`.
 | reporter daemon | 200 | 403 | 403 |
 | intruder daemon | 403 | 403 | 403 |
 
-## Known problem: entra-sim 1.0.2 rejects MSAL Python's certificate assertions
+## The end-to-end test
 
-Against `ghcr.io/gosogco/entra-sim:1.0.2`, every call that needs the certificate fails. The daemons
-get no token:
+`tests/test_example.py` checks every row of the table above against the running example, the
+daemons included. With `run.sh` running, in another terminal:
 
-```text
-reporter: no token: AADSTS700027: Client assertion failed signature validation. The certificate named by the assertion's x5t#S256 or x5t header is not a valid certificate registered on the application.
-intruder: no token: AADSTS700027: Client assertion failed signature validation. The certificate named by the assertion's x5t#S256 or x5t header is not a valid certificate registered on the application.
+```sh
+docker cp entra-sim-examples:/certs/ca.pem /tmp/entra-sim-ca.pem
+REQUESTS_CA_BUNDLE=/tmp/entra-sim-ca.pem .venv/bin/pytest tests
 ```
 
-`GET /api/me` answers `502` for every user, because the on-behalf-of call fails the same way.
-The role checks are unaffected: they need only the user's token, which the site obtains without a
-certificate.
-
-There are two causes, both in `src/auth/client_auth.rs`:
-
-- MSAL Python encodes the `x5t` and `x5t#S256` headers with `base64.urlsafe_b64encode`, which keeps
-  the `=` padding. The simulator compares them with an unpadded value, so they never match.
-- MSAL Python does not set `nbf` in the assertion, and the simulator requires it.
+Use the container name `run.sh` printed, `entra-sim` if the root `run.sh` started it. Users
+sign in by posting the simulator's sign-in form directly, so the test needs no browser. CI runs it
+in the `Python example` job.
 
 ## Files
 
@@ -92,4 +97,5 @@ There are two causes, both in `src/auth/client_auth.rs`:
 | `backend/app.py` | The FastAPI backend |
 | `daemon/daemon.py` | The daemon, `python daemon/daemon.py reporter` or `intruder` |
 | `frontend/` | The React site. Vite proxies `/api` to the backend, so the backend needs no CORS |
-| `requirements.txt` | The backend's and the daemons' Python packages |
+| `tests/test_example.py` | The end-to-end test |
+| `requirements.txt` | The backend's, the daemons' and the test's Python packages |

@@ -118,11 +118,12 @@ regenerates all three on every push and pull request and fails when one differs.
 <tr><th>CI job</th><th>What it checks</th></tr>
 <tr><td>Format, lint and test</td><td><code>cargo fmt --check</code>, <code>cargo clippy --all-targets -- -D warnings</code>, <code>cargo test</code></td></tr>
 <tr><td>Generated files are up to date</td><td>Regenerates the three data files from Microsoft's documentation and fails if one differs</td></tr>
-<tr><td>Build the simulator</td><td>Compiles the release binary once for the provider contract, Terraform and browser jobs</td></tr>
+<tr><td>Build the simulator</td><td>Compiles the release binary once for the provider contract, Terraform, browser and Python example jobs</td></tr>
 <tr><td>Container image</td><td>Builds the image and checks that it serves requests</td></tr>
 <tr><td>Provider contract</td><td>Runs <code>contract/envcheck</code>, the provider's <code>go-azure-sdk</code> discovery and token code at the version the provider pins, against the simulator</td></tr>
 <tr><td>Terraform acceptance</td><td>Applies <code>tests/terraform/</code>, requires <code>terraform plan -detailed-exitcode</code> to exit 0, then destroys</td></tr>
 <tr><td>Browser client</td><td>Runs the React example's Playwright suite in Chromium</td></tr>
+<tr><td>Python example</td><td>Applies <code>examples/fastapi-react/terraform/</code>, requires an empty plan, starts the FastAPI backend, and runs the example's pytest suite, which covers MSAL Python's certificate assertions for client credentials and on-behalf-of</td></tr>
 </table></div>
 <p>The release workflow runs on a version tag: it repeats format, lint and test, checks that the tag matches the crate version,
 publishes the image to <code>ghcr.io/gosogco/entra-sim</code>, checks the published image, and creates the GitHub release.</p>

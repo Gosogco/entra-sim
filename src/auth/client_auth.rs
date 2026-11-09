@@ -6,6 +6,10 @@
 //! `keyCredentials`, names that certificate in its `x5t#S256` (or the older `x5t`) header, and
 //! carries `aud` set to the token endpoint, `iss` and `sub` set to the client ID, `jti`, `nbf` and
 //! `exp`.
+//!
+//! The simulator is more lenient than that page, because MSAL Python, Microsoft's own library,
+//! keeps the `=` padding on the thumbprint and sends no `nbf`. A padded thumbprint matches, and
+//! `nbf` is checked only when present.
 
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
@@ -61,8 +65,8 @@ pub fn verify_certificate_assertion(
         .filter(|credential| credential.start_date_time <= now && now < credential.end_date_time)
         .filter_map(|credential| Some((credential, certificate_der(credential)?)))
         .find(|(_, der)| {
-            header.x5t_s256.as_deref() == Some(thumbprint::<Sha256>(der).as_str())
-                || header.x5t.as_deref() == Some(thumbprint::<Sha1>(der).as_str())
+            unpadded(header.x5t_s256.as_deref()) == Some(thumbprint::<Sha256>(der).as_str())
+                || unpadded(header.x5t.as_deref()) == Some(thumbprint::<Sha1>(der).as_str())
         })
         .map(|(_, der)| der)
         .ok_or_else(|| {
@@ -81,7 +85,7 @@ pub fn verify_certificate_assertion(
     validation.set_audience(audiences);
     validation.set_issuer(&[client_id]);
     validation.sub = Some(client_id.to_string());
-    validation.set_required_spec_claims(&["exp", "aud", "iss", "sub", "nbf"]);
+    validation.set_required_spec_claims(&["exp", "aud", "iss", "sub"]);
     validation.validate_nbf = true;
     let claims = decode::<Value>(assertion, &key, &validation)
         .map_err(|error| assertion_failure(&error))?
@@ -125,6 +129,11 @@ fn certificate_der(credential: &KeyCredential) -> Option<Vec<u8>> {
 
 fn thumbprint<D: Digest>(der: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(D::digest(der))
+}
+
+/// A thumbprint header without the `=` padding some clients keep.
+fn unpadded(value: Option<&str>) -> Option<&str> {
+    value.map(|value| value.trim_end_matches('='))
 }
 
 fn rsa_key(der: &[u8]) -> Option<DecodingKey> {
