@@ -1,0 +1,12 @@
+# Written by run.sh.
+.env
+certs/
+.venv/
+__pycache__/
+frontend/node_modules/
+frontend/dist/
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+frontend/tsconfig.tsbuildinfo

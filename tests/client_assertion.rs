@@ -3,7 +3,7 @@
 mod common;
 
 use base64::Engine;
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+use base64::engine::general_purpose::{STANDARD, URL_SAFE, URL_SAFE_NO_PAD};
 use common::{Graph, Sim, decode_claims};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde_json::{Value, json};
@@ -51,8 +51,12 @@ struct Assertion<'a> {
     key: &'a str,
     /// Name the certificate with `x5t#S256`, or with the older SHA-1 `x5t`.
     sha256: bool,
+    /// Keep the `=` padding on the thumbprint, as MSAL Python's `base64.urlsafe_b64encode` does.
+    padded: bool,
     audience: String,
     expires_in: i64,
+    /// Seconds from now for `nbf`, or no `nbf` at all, which is what MSAL Python sends.
+    not_before: Option<i64>,
 }
 
 impl<'a> Assertion<'a> {
@@ -61,32 +65,41 @@ impl<'a> Assertion<'a> {
             algorithm: Algorithm::PS256,
             key: KEY,
             sha256: true,
+            padded: false,
             audience: format!(
                 "{}/{}/oauth2/v2.0/token",
                 sim.public_base_url, sim.tenant_id
             ),
             expires_in: 600,
+            not_before: Some(-60),
         }
     }
 
     fn sign(&self, client_id: &str) -> String {
         let der = certificate_der();
         let mut header = Header::new(self.algorithm);
-        if self.sha256 {
-            header.x5t_s256 = Some(URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(&der)));
+        let engine = if self.padded {
+            URL_SAFE
         } else {
-            header.x5t = Some(URL_SAFE_NO_PAD.encode(sha1::Sha1::digest(&der)));
+            URL_SAFE_NO_PAD
+        };
+        if self.sha256 {
+            header.x5t_s256 = Some(engine.encode(sha2::Sha256::digest(&der)));
+        } else {
+            header.x5t = Some(engine.encode(sha1::Sha1::digest(&der)));
         }
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let claims = json!({
+        let mut claims = json!({
             "aud": self.audience,
             "iss": client_id,
             "sub": client_id,
             "jti": uuid::Uuid::new_v4().to_string(),
-            "nbf": now - 60,
             "iat": now - 60,
             "exp": now + self.expires_in,
         });
+        if let Some(offset) = self.not_before {
+            claims["nbf"] = json!(now + offset);
+        }
         encode(
             &header,
             &claims,
@@ -150,6 +163,98 @@ async fn rs256_and_the_sha1_thumbprint_are_accepted_too() {
     )
     .await;
     assert_eq!(response.status(), 200);
+}
+
+/// MSAL Python's `JwtAssertionCreator` encodes the thumbprint with `base64.urlsafe_b64encode`,
+/// which keeps the padding. Entra accepts it.
+#[tokio::test]
+async fn a_padded_sha256_thumbprint_is_accepted() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let client = client_with_certificate(&graph).await;
+
+    let assertion = Assertion {
+        padded: true,
+        ..Assertion::for_sim(&sim)
+    }
+    .sign(&client.app_id);
+    let response = app_token(
+        &sim,
+        &client.app_id,
+        &assertion,
+        "https://graph.microsoft.com/.default",
+    )
+    .await;
+    assert_eq!(response.status(), 200);
+}
+
+#[tokio::test]
+async fn a_padded_sha1_thumbprint_is_accepted() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let client = client_with_certificate(&graph).await;
+
+    let assertion = Assertion {
+        algorithm: Algorithm::RS256,
+        sha256: false,
+        padded: true,
+        ..Assertion::for_sim(&sim)
+    }
+    .sign(&client.app_id);
+    let response = app_token(
+        &sim,
+        &client.app_id,
+        &assertion,
+        "https://graph.microsoft.com/.default",
+    )
+    .await;
+    assert_eq!(response.status(), 200);
+}
+
+/// MSAL Python sets `nbf` only when its caller asks, and `ConfidentialClientApplication` never
+/// does. Entra accepts the assertion without it.
+#[tokio::test]
+async fn an_assertion_without_nbf_is_accepted() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let client = client_with_certificate(&graph).await;
+
+    let assertion = Assertion {
+        not_before: None,
+        ..Assertion::for_sim(&sim)
+    }
+    .sign(&client.app_id);
+    let response = app_token(
+        &sim,
+        &client.app_id,
+        &assertion,
+        "https://graph.microsoft.com/.default",
+    )
+    .await;
+    assert_eq!(response.status(), 200);
+}
+
+#[tokio::test]
+async fn an_assertion_not_yet_valid_is_refused() {
+    let sim = Sim::start().await;
+    let graph = sim.graph().await;
+    let client = client_with_certificate(&graph).await;
+
+    let assertion = Assertion {
+        not_before: Some(600),
+        ..Assertion::for_sim(&sim)
+    }
+    .sign(&client.app_id);
+    let response = app_token(
+        &sim,
+        &client.app_id,
+        &assertion,
+        "https://graph.microsoft.com/.default",
+    )
+    .await;
+    assert_eq!(response.status(), 401);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error_codes"][0], 50027);
 }
 
 #[tokio::test]

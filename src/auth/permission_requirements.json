@@ -482,6 +482,9 @@
       ],
       [
         "Group.ReadWrite.All"
+      ],
+      [
+        "HardDeletionSetting.ReadWrite.Enable"
       ]
     ],
     "scopes": [
@@ -499,6 +502,9 @@
       ],
       [
         "Group.ReadWrite.All"
+      ],
+      [
+        "HardDeletionSetting.ReadWrite.Enable"
       ]
     ],
     "source": "includes/permissions/group-update-permissions.md"
@@ -521,6 +527,9 @@
       ],
       [
         "Group.ReadWrite.All"
+      ],
+      [
+        "HardDeletionSetting.ReadWrite.Enable"
       ]
     ],
     "scopes": [
@@ -538,6 +547,9 @@
       ],
       [
         "Group.ReadWrite.All"
+      ],
+      [
+        "HardDeletionSetting.ReadWrite.Enable"
       ]
     ],
     "source": "includes/permissions/group-update-permissions.md"
@@ -1070,11 +1082,17 @@
       ],
       [
         "Application.ReadWrite.All"
+      ],
+      [
+        "HardDeletionSetting.ReadWrite.Enable"
       ]
     ],
     "scopes": [
       [
         "Application.ReadWrite.All"
+      ],
+      [
+        "HardDeletionSetting.ReadWrite.Enable"
       ]
     ],
     "source": "includes/permissions/application-update-permissions.md"
@@ -1088,11 +1106,17 @@
       ],
       [
         "Application.ReadWrite.All"
+      ],
+      [
+        "HardDeletionSetting.ReadWrite.Enable"
       ]
     ],
     "scopes": [
       [
         "Application.ReadWrite.All"
+      ],
+      [
+        "HardDeletionSetting.ReadWrite.Enable"
       ]
     ],
     "source": "includes/permissions/application-update-permissions.md"
@@ -1484,6 +1508,9 @@
       ],
       [
         "Directory.ReadWrite.All"
+      ],
+      [
+        "HardDeletionSetting.ReadWrite.Enable"
       ]
     ],
     "scopes": [
@@ -1495,6 +1522,9 @@
       ],
       [
         "Directory.ReadWrite.All"
+      ],
+      [
+        "HardDeletionSetting.ReadWrite.Enable"
       ]
     ],
     "source": "includes/permissions/serviceprincipal-update-permissions.md"
@@ -1514,6 +1544,9 @@
       ],
       [
         "Directory.ReadWrite.All"
+      ],
+      [
+        "HardDeletionSetting.ReadWrite.Enable"
       ]
     ],
     "scopes": [
@@ -1525,6 +1558,9 @@
       ],
       [
         "Directory.ReadWrite.All"
+      ],
+      [
+        "HardDeletionSetting.ReadWrite.Enable"
       ]
     ],
     "source": "includes/permissions/serviceprincipal-update-permissions.md"

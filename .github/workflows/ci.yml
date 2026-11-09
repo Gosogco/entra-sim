@@ -380,3 +380,94 @@ jobs:
         run: |
           cat simulator.log
           cat examples/react-spa/.env | sed 's/^/env: /'
+
+  python-example:
+    name: Python example
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Fetch the simulator
+        uses: actions/download-artifact@v4
+        with:
+          name: entra-sim
+          path: target/release
+
+      # An artifact does not keep the executable bit.
+      - run: chmod +x target/release/entra-sim
+
+      - name: Start the simulator
+        run: |
+          mkdir -p certs
+          ./target/release/entra-sim \
+            --bind 127.0.0.1 --http-port 8080 --https-port 8443 \
+            --tls-san localhost,127.0.0.1 --public-host localhost:8443 \
+            --tenant-domain example.test --ca-out certs/ca.pem > simulator.log 2>&1 &
+
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --output /dev/null http://127.0.0.1:8080/__sim__/health; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent --output /dev/null http://127.0.0.1:8080/__sim__/health
+
+      # Before the simulator's CA is trusted below, which would make pip distrust PyPI.
+      - name: Install the example
+        working-directory: examples/fastapi-react
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Create the certificates and the directory objects
+        working-directory: examples/fastapi-react
+        env:
+          ARM_METADATA_HOSTNAME: localhost:8443
+          ARM_TENANT_ID: 00000000-0000-0000-0000-000000000001
+          ARM_CLIENT_ID: 11111111-1111-1111-1111-111111111111
+          ARM_CLIENT_SECRET: entra-sim-bootstrap-secret
+        run: |
+          export SSL_CERT_FILE="$GITHUB_WORKSPACE/certs/ca.pem"
+          mkdir -p certs
+          for name in api reporter intruder; do
+            openssl req -x509 -newkey rsa:2048 -nodes -days 30 \
+              -subj "/CN=entra-sim FastAPI example $name" \
+              -keyout "certs/$name-key.pem" -out "certs/$name.pem" 2>/dev/null
+          done
+          terraform -chdir=terraform init -input=false
+          terraform -chdir=terraform apply -auto-approve -input=false
+          # A non-empty plan would mean the simulator is not echoing back something the provider
+          # wrote, the same gate the other Terraform jobs apply.
+          terraform -chdir=terraform plan -detailed-exitcode -input=false
+          terraform -chdir=terraform output -raw env > .env
+
+      # Every row of the README's expected results, including the certificate paths through MSAL
+      # Python: the daemons' client credentials and the backend's on-behalf-of call.
+      - name: Run the example's test
+        working-directory: examples/fastapi-react
+        run: |
+          export SSL_CERT_FILE="$GITHUB_WORKSPACE/certs/ca.pem" REQUESTS_CA_BUNDLE="$GITHUB_WORKSPACE/certs/ca.pem"
+          set -a
+          source <(grep -v '^VITE_' .env)
+          set +a
+          .venv/bin/uvicorn --app-dir backend app:app --host 127.0.0.1 --port 8000 > backend.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl --silent --output /dev/null http://127.0.0.1:8000/api/orders && break
+            sleep 1
+          done
+          .venv/bin/pytest tests -v
+
+      - name: Show the logs on failure
+        if: failure()
+        run: |
+          cat simulator.log
+          cat examples/fastapi-react/backend.log
